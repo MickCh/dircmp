@@ -5,6 +5,7 @@ use crate::{
 };
 use ratatui::{
     layout::Rect,
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -31,14 +32,13 @@ impl StatusBar {
             AppState::Ready => {
                 if let Some(result) = diff {
                     format!(
-                        " Entries: {}  Different: {}  Left only: {}  Right only: {}  Identical: {}  | {} | {}",
+                        " Entries: {}  Different: {}  Left only: {}  Right only: {}  Identical: {}  | {}",
                         result.total(),
                         result.different().count(),
                         result.left_only().count(),
                         result.right_only().count(),
                         result.identical().count(),
                         comparator_name,
-                        filter.label(),
                     )
                 } else {
                     " Ready".to_string()
@@ -46,11 +46,21 @@ impl StatusBar {
             }
         };
 
+        fn key_style(active: bool) -> Style {
+            if active { Theme::statusbar_key() } else { Theme::statusbar_inactive_key() }
+        }
+
         let keys = Line::from(vec![
             Span::styled(" F5", Theme::statusbar_key()),
-            Span::styled(":Compare", Theme::statusbar()),
-            Span::styled("  F", Theme::statusbar_key()),
-            Span::styled(":Filter", Theme::statusbar()),
+            Span::styled(":Scan", Theme::statusbar()),
+            Span::styled("  l", key_style(filter.show_left_only)),
+            Span::styled(":►", key_style(filter.show_left_only)),
+            Span::styled("  r", key_style(filter.show_right_only)),
+            Span::styled(":◄", key_style(filter.show_right_only)),
+            Span::styled("  d", key_style(filter.show_different)),
+            Span::styled(":≠", key_style(filter.show_different)),
+            Span::styled("  i", key_style(filter.show_identical)),
+            Span::styled(":=", key_style(filter.show_identical)),
             Span::styled("  ↑↓", Theme::statusbar_key()),
             Span::styled(":Navigate", Theme::statusbar()),
             Span::styled("  Home/End", Theme::statusbar_key()),

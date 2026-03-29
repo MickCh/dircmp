@@ -117,13 +117,13 @@ fn entry_styles(
             Theme::different(),
         ),
         DiffStatus::LeftOnly => (
-            "◄",
+            "►",
             Theme::left_only(),
             Theme::left_only(),
             Theme::identical(),
         ),
         DiffStatus::RightOnly => (
-            "►",
+            "◄",
             Theme::right_only(),
             Theme::identical(),
             Theme::right_only(),

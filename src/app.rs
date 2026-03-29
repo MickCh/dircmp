@@ -52,33 +52,33 @@ pub enum AppState {
 // Diff filter
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiffFilter {
-    All,
-    DifferencesOnly,
+#[derive(Debug, Clone, Copy)]
+pub struct DiffFilter {
+    pub show_left_only: bool,
+    pub show_right_only: bool,
+    pub show_different: bool,
+    pub show_identical: bool,
+}
+
+impl Default for DiffFilter {
+    fn default() -> Self {
+        Self {
+            show_left_only: true,
+            show_right_only: true,
+            show_different: true,
+            show_identical: true,
+        }
+    }
 }
 
 impl DiffFilter {
     pub fn matches(&self, entry: &DiffEntry) -> bool {
-        match self {
-            DiffFilter::All => true,
-            // Pending entries are shown in DifferencesOnly mode — we don't
-            // know yet whether they are identical or different.
-            DiffFilter::DifferencesOnly => entry.status.has_difference(),
-        }
-    }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            DiffFilter::All => "All",
-            DiffFilter::DifferencesOnly => "Differences only",
-        }
-    }
-
-    pub fn toggle(self) -> Self {
-        match self {
-            DiffFilter::All => DiffFilter::DifferencesOnly,
-            DiffFilter::DifferencesOnly => DiffFilter::All,
+        match entry.status {
+            DiffStatus::LeftOnly => self.show_left_only,
+            DiffStatus::RightOnly => self.show_right_only,
+            DiffStatus::Different => self.show_different,
+            DiffStatus::Identical => self.show_identical,
+            _ => true,
         }
     }
 }
@@ -101,6 +101,8 @@ pub struct App {
     state: AppState,
     /// Receiver for background comparison results.
     compare_rx: Option<mpsc::Receiver<CompareMsg>>,
+    /// Height of the main list area (updated each frame, used for page navigation).
+    page_height: usize,
 }
 
 impl App {
@@ -121,11 +123,12 @@ impl App {
             diff_result: None,
             filtered_entries: Vec::new(),
             view_rows: Vec::new(),
-            filter: DiffFilter::All,
+            filter: DiffFilter::default(),
             comparator_name,
             should_quit: false,
             state: AppState::Idle,
             compare_rx: None,
+            page_height: 40,
         }
     }
 
@@ -353,8 +356,6 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_key(&mut self, code: KeyCode) {
-        let step = self.config.ui.panel_scroll_step;
-
         match code {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.should_quit = true;
@@ -362,8 +363,20 @@ impl App {
             KeyCode::F(5) => {
                 self.run_diff();
             }
-            KeyCode::Char('f') | KeyCode::Char('F') => {
-                self.filter = self.filter.toggle();
+            KeyCode::Char('l') | KeyCode::Char('L') => {
+                self.filter.show_left_only = !self.filter.show_left_only;
+                self.rebuild_filtered();
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                self.filter.show_right_only = !self.filter.show_right_only;
+                self.rebuild_filtered();
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                self.filter.show_different = !self.filter.show_different;
+                self.rebuild_filtered();
+            }
+            KeyCode::Char('i') | KeyCode::Char('I') => {
+                self.filter.show_identical = !self.filter.show_identical;
                 self.rebuild_filtered();
             }
             KeyCode::Down => {
@@ -378,14 +391,14 @@ impl App {
             }
             KeyCode::PageDown => {
                 let mut idx = self.diff_view.selected_index().unwrap_or(0);
-                for _ in 0..step {
+                for _ in 0..self.page_height {
                     idx = next_entry(&self.view_rows, idx);
                 }
                 self.diff_view.list_state.select(Some(idx));
             }
             KeyCode::PageUp => {
                 let mut idx = self.diff_view.selected_index().unwrap_or(0);
-                for _ in 0..step {
+                for _ in 0..self.page_height {
                     idx = prev_entry(&self.view_rows, idx);
                 }
                 self.diff_view.list_state.select(Some(idx));
@@ -406,6 +419,7 @@ impl App {
 
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let layout = AppLayout::compute(frame.area());
+        self.page_height = layout.main.height as usize;
 
         // Paths header
         let half = (layout.header.width as usize).saturating_sub(2) / 2;
