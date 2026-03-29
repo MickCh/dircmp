@@ -1,66 +1,68 @@
-# folder-diff
+# dircmp
 
-Narzędzie TUI do porównywania zawartości dwóch folderów. Działa na Linux i Windows.
+A TUI tool for comparing the contents of two folders. Works on Linux and Windows.
 
-## Funkcje
+## Features
 
-- Rekurencyjne skanowanie folderów
-- Dwa panele obok siebie (inspirowane Total Commanderem)
-- Konfigurowalne strategie porównywania plików:
-  - **hash** – SHA-256 (domyślna, najdokładniejsza)
-  - **metadata** – rozmiar + data modyfikacji (szybka)
-  - **byte** – bajt po bajcie
-  - **text** – tekstowe z opcją ignorowania spacji/wielkości liter
-- Kolorowe oznaczenia różnic
-- Konfiguracja przez plik TOML
+- Recursive folder scanning
+- Two side-by-side panels (inspired by Total Commander)
+- Configurable file comparison strategies:
+  - **hash** – SHA-256 (default, most accurate)
+  - **metadata** – size + modification date (fast)
+  - **byte** – byte-by-byte
+  - **text** – text-based with optional whitespace/case normalization
+- Color-coded diff indicators
+- TOML configuration file
 
-## Instalacja
+## Installation
 
 ```bash
 git clone <repo>
-cd folder-diff
+cd dircmp
 cargo build --release
-# Plik binarny: target/release/folder-diff
+# Binary: target/release/dircmp
 ```
 
-## Użycie
+## Usage
 
 ```bash
-folder-diff <lewy_folder> <prawy_folder> [opcje]
+dircmp <left_folder> <right_folder> [options]
 
-# Przykłady:
-folder-diff ~/projekt_v1 ~/projekt_v2
-folder-diff /backup/docs /current/docs --config ~/.config/folder-diff/config.toml
+# Examples:
+dircmp ~/project_v1 ~/project_v2
+dircmp /backup/docs /current/docs --config ~/.config/dircmp/config.toml
 ```
 
-## Klawisze
+## Keybindings
 
-| Klawisz     | Akcja                        |
-|-------------|------------------------------|
-| `F5`        | Uruchom porównanie           |
-| `Tab`       | Przełącz aktywny panel       |
-| `↑` / `↓`  | Nawigacja po wierszach       |
-| `PgUp/Dn`  | Przewijanie o kilka wierszy  |
-| `q`         | Wyjście                      |
+| Key         | Action                         |
+|-------------|--------------------------------|
+| `F5`        | Run comparison                 |
+| `F`         | Toggle filter (all / diffs only) |
+| `Tab`       | Switch active panel            |
+| `↑` / `↓`  | Navigate rows                  |
+| `PgUp/PgDn` | Scroll by several rows        |
+| `Home/End`  | Jump to first/last entry       |
+| `q`         | Quit                           |
 
-## Legenda kolorów
+## Color Legend
 
-| Symbol | Kolor   | Znaczenie                        |
+| Symbol | Color   | Meaning                          |
 |--------|---------|----------------------------------|
-| `◄`    | Czerwony| Plik tylko w lewym folderze      |
-| `►`    | Zielony | Plik tylko w prawym folderze     |
-| `≠`    | Żółty   | Pliki różnią się zawartością     |
-| `=`    | Szary   | Pliki identyczne                 |
-| `!`    | Magenta | Konflikt typów (plik vs katalog) |
-| `✗`    | Czerwony| Błąd odczytu                    |
+| `◄`    | Red     | File exists only in left folder  |
+| `►`    | Green   | File exists only in right folder |
+| `≠`    | Yellow  | Files differ in content          |
+| `=`    | Gray    | Files are identical              |
+| `!`    | Magenta | Type conflict (file vs directory)|
+| `✗`    | Red     | Read error                       |
 
-## Konfiguracja
+## Configuration
 
-Domyślna lokalizacja: `~/.config/folder-diff/config.toml`
+Default location: `~/.config/dircmp/config.toml`
 
 ```toml
 [comparison]
-# Strategia: "hash" | "metadata" | "byte" | "text"
+# Strategy: "hash" | "metadata" | "byte" | "text"
 strategy = "hash"
 
 [comparison.text]
@@ -75,25 +77,25 @@ ignore_patterns = [".git", ".DS_Store", "node_modules"]
 follow_symlinks = false
 ```
 
-## Dodawanie nowej strategii porównywania
+## Adding a New Comparison Strategy
 
-Implementuj trait `FileComparator` w nowym pliku w `src/engine/comparator/`:
+Implement the `FileComparator` trait in a new file under `src/engine/comparator/`:
 
 ```rust
 pub struct MyComparator;
 
 impl FileComparator for MyComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
-        // Twoja logika
+        // Your logic here
     }
 
-    fn name(&self) -> &str { "moja strategia" }
+    fn name(&self) -> &str { "my strategy" }
 }
 ```
 
-Następnie dodaj wariant do `ComparisonStrategy` w `config/mod.rs` i do fabryki w `engine/comparator/mod.rs`.
+Then add a variant to `ComparisonStrategy` in `config/mod.rs` and register it in the factory in `engine/comparator/mod.rs`.
 
-## Testy
+## Tests
 
 ```bash
 cargo test

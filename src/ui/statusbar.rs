@@ -24,7 +24,6 @@ impl StatusBar {
         let stats = match state {
             AppState::Idle => " Naciśnij F5 aby porównać foldery".to_string(),
             AppState::Scanning => " ⏳ Skanowanie…".to_string(),
-            AppState::Error(e) => format!(" ✗ Błąd: {}", e),
             AppState::Ready => {
                 if let Some(result) = diff {
                     format!(
@@ -48,8 +47,6 @@ impl StatusBar {
             Span::styled(":Porównaj", Theme::statusbar()),
             Span::styled("  F", Theme::statusbar_key()),
             Span::styled(":Filtr", Theme::statusbar()),
-            Span::styled("  Tab", Theme::statusbar_key()),
-            Span::styled(":Panel", Theme::statusbar()),
             Span::styled("  ↑↓", Theme::statusbar_key()),
             Span::styled(":Nawigacja", Theme::statusbar()),
             Span::styled("  Home/End", Theme::statusbar_key()),

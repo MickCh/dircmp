@@ -1,11 +1,12 @@
-use folder_diff::engine::{
+use dircmp::engine::{
     comparator::{hash::HashComparator, CompareResult, FileComparator},
     diff::{DiffEngine, DiffStatus},
     scanner::Scanner,
 };
-use folder_diff::config::ScanConfig;
-use folder_diff::app::DiffFilter;
+use dircmp::config::ScanConfig;
+use dircmp::app::DiffFilter;
 use std::fs;
+use std::path::PathBuf;
 use tempfile::tempdir;
 
 fn default_scan_config() -> ScanConfig {
@@ -33,7 +34,7 @@ fn identical_folders() {
 
     assert_eq!(result.total(), 1);
     assert_eq!(result.identical().count(), 1);
-    assert_eq!(result.differences_count(), 0);
+    assert_eq!(result.entries.iter().filter(|e| e.status.has_difference()).count(), 0);
 }
 
 #[test]
@@ -110,9 +111,9 @@ fn ignore_patterns() {
     let scanner = Scanner::new(config);
     let map = scanner.scan(left.path());
 
-    assert!(!map.keys().any(|p| p.to_string_lossy().contains(".git")));
-    assert!(map.keys().any(|p| p.to_string_lossy().contains("a.txt")));
-    let _ = right; // suppress unused warning
+    assert!(!map.keys().any(|p: &PathBuf| p.to_string_lossy().contains(".git")));
+    assert!(map.keys().any(|p: &PathBuf| p.to_string_lossy().contains("a.txt")));
+    let _ = right;
 }
 
 #[test]
@@ -158,12 +159,10 @@ fn filter_differences_only() {
     let engine = DiffEngine::new(&comparator);
     let result = engine.diff(&left_map, &right_map, left.path(), right.path());
 
-    // Total = 3, identyczne = 1, różne = 1, tylko lewe = 1
     assert_eq!(result.total(), 3);
 
     let filter = DiffFilter::DifferencesOnly;
     let filtered: Vec<_> = result.entries.iter().filter(|e| filter.matches(e)).collect();
-    // Tylko różne i tylko_lewe – nie identical
     assert_eq!(filtered.len(), 2);
     assert!(filtered.iter().all(|e| e.status.has_difference()));
 }

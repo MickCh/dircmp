@@ -7,8 +7,11 @@ use crate::{
     },
     ui::{
         layout::AppLayout,
-        panel::{Panel, PanelSide},
+        panel::{
+            build_view_rows, first_entry, last_entry, next_entry, prev_entry, DiffView, ViewRow,
+        },
         statusbar::StatusBar,
+        theme::Theme,
     },
 };
 use anyhow::Result;
@@ -42,12 +45,10 @@ fn render_overlay(frame: &mut ratatui::Frame, message: &str) {
     frame.render_widget(paragraph, popup_area);
 }
 
-/// Aktywny filtr wyświetlanych wpisów.
+/// Active display filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffFilter {
-    /// Pokaż wszystko.
     All,
-    /// Tylko wpisy z różnicami (LeftOnly, RightOnly, Different, TypeConflict, Error).
     DifferencesOnly,
 }
 
@@ -78,17 +79,18 @@ pub enum AppState {
     Idle,
     Scanning,
     Ready,
-    Error(String),
 }
 
 pub struct App {
     config: Config,
-    left_panel: Panel,
-    right_panel: Panel,
-    active_panel: PanelSide,
+    left_root: PathBuf,
+    right_root: PathBuf,
+    diff_view: DiffView,
     diff_result: Option<crate::engine::diff::DiffResult>,
-    /// Przefiltrowane wpisy – aktualizowane po każdej zmianie filtru/wyników.
+    /// Filtered entries – rebuilt whenever filter or results change.
     filtered_entries: Vec<DiffEntry>,
+    /// View rows derived from filtered_entries (includes folder headers).
+    view_rows: Vec<ViewRow>,
     filter: DiffFilter,
     comparator_name: String,
     should_quit: bool,
@@ -102,11 +104,12 @@ impl App {
 
         Self {
             config,
-            left_panel: Panel::new(PanelSide::Left, left_path),
-            right_panel: Panel::new(PanelSide::Right, right_path),
-            active_panel: PanelSide::Left,
+            left_root: left_path,
+            right_root: right_path,
+            diff_view: DiffView::new(),
             diff_result: None,
             filtered_entries: Vec::new(),
+            view_rows: Vec::new(),
             filter: DiffFilter::All,
             comparator_name,
             should_quit: false,
@@ -114,7 +117,7 @@ impl App {
         }
     }
 
-    /// Odświeża `filtered_entries` na podstawie aktualnego wyniku i filtra.
+    /// Rebuilds `filtered_entries` and `view_rows` from current diff result and filter.
     fn rebuild_filtered(&mut self) {
         self.filtered_entries = self
             .diff_result
@@ -128,40 +131,36 @@ impl App {
             })
             .unwrap_or_default();
 
-        // Resetuj zaznaczenie żeby nie wyjść poza zakres
-        let max = self.filtered_entries.len().saturating_sub(1);
-        let clamp = |idx: usize| idx.min(max);
-        let li = self.left_panel.selected_index().map(clamp).unwrap_or(0);
-        let ri = self.right_panel.selected_index().map(clamp).unwrap_or(0);
-        self.left_panel.list_state.select(Some(li));
-        self.right_panel.list_state.select(Some(ri));
+        self.view_rows = build_view_rows(&self.filtered_entries);
+
+        let idx = first_entry(&self.view_rows);
+        self.diff_view
+            .list_state
+            .select(if self.view_rows.is_empty() { None } else { Some(idx) });
     }
 
-    /// Uruchamia porównanie folderów. Błędy są przechwytywane i wyświetlane w UI.
+    /// Runs the folder comparison and updates state.
     pub fn run_diff(&mut self) {
         self.state = AppState::Scanning;
 
         let scanner = Scanner::new(self.config.scan.clone());
-        let left_map = scanner.scan(&self.left_panel.root.clone());
-        let right_map = scanner.scan(&self.right_panel.root.clone());
+        let left_map = scanner.scan(&self.left_root.clone());
+        let right_map = scanner.scan(&self.right_root.clone());
 
         let comparator = create_comparator(&self.config.comparison);
         let engine = DiffEngine::new(comparator.as_ref());
 
-        let result = engine.diff(
-            &left_map,
-            &right_map,
-            &self.left_panel.root.clone(),
-            &self.right_panel.root.clone(),
-        );
+        let result = engine.diff(&left_map, &right_map, &self.left_root, &self.right_root);
 
         self.diff_result = Some(result);
         self.rebuild_filtered();
         self.state = AppState::Ready;
     }
 
-    /// Główna pętla aplikacji.
+    /// Main application loop. Starts comparison immediately on launch.
     pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
+        self.run_diff();
+
         loop {
             terminal.draw(|frame| self.render(frame))?;
 
@@ -181,14 +180,6 @@ impl App {
     }
 
     fn handle_key(&mut self, code: KeyCode) {
-        // Jeśli jesteśmy w stanie błędu, dowolny klawisz go kasuje
-        if matches!(self.state, AppState::Error(_)) {
-            self.state = AppState::Ready;
-            return;
-        }
-
-        // Kopiujemy potrzebne wartości zanim pożyczymy self mutowalnie
-        let entry_count = self.filtered_entries.len();
         let step = self.config.ui.panel_scroll_step;
 
         match code {
@@ -198,78 +189,41 @@ impl App {
             KeyCode::F(5) => {
                 self.run_diff();
             }
-            KeyCode::Tab => {
-                self.active_panel = match self.active_panel {
-                    PanelSide::Left => PanelSide::Right,
-                    PanelSide::Right => PanelSide::Left,
-                };
-            }
             KeyCode::Char('f') | KeyCode::Char('F') => {
                 self.filter = self.filter.toggle();
                 self.rebuild_filtered();
             }
             KeyCode::Down => {
-                let max = entry_count.saturating_sub(1);
-                match self.active_panel {
-                    PanelSide::Left => {
-                        let cur = self.left_panel.selected_index().unwrap_or(0);
-                        self.left_panel.list_state.select(Some((cur + 1).min(max)));
-                    }
-                    PanelSide::Right => {
-                        let cur = self.right_panel.selected_index().unwrap_or(0);
-                        self.right_panel.list_state.select(Some((cur + 1).min(max)));
-                    }
-                }
+                let cur = self.diff_view.selected_index().unwrap_or(0);
+                let next = next_entry(&self.view_rows, cur);
+                self.diff_view.list_state.select(Some(next));
             }
             KeyCode::Up => {
-                match self.active_panel {
-                    PanelSide::Left => {
-                        let cur = self.left_panel.selected_index().unwrap_or(0);
-                        self.left_panel.list_state.select(Some(cur.saturating_sub(1)));
-                    }
-                    PanelSide::Right => {
-                        let cur = self.right_panel.selected_index().unwrap_or(0);
-                        self.right_panel.list_state.select(Some(cur.saturating_sub(1)));
-                    }
-                }
+                let cur = self.diff_view.selected_index().unwrap_or(0);
+                let prev = prev_entry(&self.view_rows, cur);
+                self.diff_view.list_state.select(Some(prev));
             }
             KeyCode::PageDown => {
-                let max = entry_count.saturating_sub(1);
-                match self.active_panel {
-                    PanelSide::Left => {
-                        let cur = self.left_panel.selected_index().unwrap_or(0);
-                        self.left_panel.list_state.select(Some((cur + step).min(max)));
-                    }
-                    PanelSide::Right => {
-                        let cur = self.right_panel.selected_index().unwrap_or(0);
-                        self.right_panel.list_state.select(Some((cur + step).min(max)));
-                    }
+                let mut idx = self.diff_view.selected_index().unwrap_or(0);
+                for _ in 0..step {
+                    idx = next_entry(&self.view_rows, idx);
                 }
+                self.diff_view.list_state.select(Some(idx));
             }
             KeyCode::PageUp => {
-                match self.active_panel {
-                    PanelSide::Left => {
-                        let cur = self.left_panel.selected_index().unwrap_or(0);
-                        self.left_panel.list_state.select(Some(cur.saturating_sub(step)));
-                    }
-                    PanelSide::Right => {
-                        let cur = self.right_panel.selected_index().unwrap_or(0);
-                        self.right_panel.list_state.select(Some(cur.saturating_sub(step)));
-                    }
+                let mut idx = self.diff_view.selected_index().unwrap_or(0);
+                for _ in 0..step {
+                    idx = prev_entry(&self.view_rows, idx);
                 }
+                self.diff_view.list_state.select(Some(idx));
             }
             KeyCode::Home => {
-                match self.active_panel {
-                    PanelSide::Left => self.left_panel.list_state.select(Some(0)),
-                    PanelSide::Right => self.right_panel.list_state.select(Some(0)),
-                }
+                let idx = first_entry(&self.view_rows);
+                self.diff_view.list_state.select(Some(idx));
             }
             KeyCode::End => {
-                let last = entry_count.saturating_sub(1);
-                match self.active_panel {
-                    PanelSide::Left => self.left_panel.list_state.select(Some(last)),
-                    PanelSide::Right => self.right_panel.list_state.select(Some(last)),
-                }
+                let idx = last_entry(&self.view_rows);
+                self.diff_view.list_state.select(Some(idx));
             }
             _ => {}
         }
@@ -278,36 +232,23 @@ impl App {
     fn render(&mut self, frame: &mut ratatui::Frame) {
         let layout = AppLayout::compute(frame.area());
 
-        // Synchronizuj zaznaczenie między panelami
-        match self.active_panel {
-            PanelSide::Left => {
-                if let Some(idx) = self.left_panel.selected_index() {
-                    self.right_panel.list_state.select(Some(idx));
-                }
-            }
-            PanelSide::Right => {
-                if let Some(idx) = self.right_panel.selected_index() {
-                    self.left_panel.list_state.select(Some(idx));
-                }
-            }
-        }
-
-        let entries = self.filtered_entries.as_slice();
-
-        self.left_panel.render(
-            frame,
-            layout.left_panel,
-            entries,
-            self.active_panel == PanelSide::Left,
+        // Paths header
+        let half = (layout.header.width as usize).saturating_sub(2) / 2;
+        let header_text = format!(
+            " {:<half$}  {}",
+            self.left_root.display(),
+            self.right_root.display(),
+            half = half
+        );
+        frame.render_widget(
+            Paragraph::new(header_text).style(Theme::header_path()),
+            layout.header,
         );
 
-        self.right_panel.render(
-            frame,
-            layout.right_panel,
-            entries,
-            self.active_panel == PanelSide::Right,
-        );
+        // Diff list
+        self.diff_view.render(frame, layout.main, &self.view_rows);
 
+        // Status bar
         StatusBar::render(
             frame,
             layout.statusbar,
@@ -317,18 +258,10 @@ impl App {
             &self.filter,
         );
 
-        // Nakładka na środku ekranu dla stanów specjalnych
+        // Overlay for transient states
         match &self.state {
-            AppState::Scanning => {
-                render_overlay(frame, " ⏳ Skanowanie folderów… ");
-            }
-            AppState::Error(msg) => {
-                let msg = msg.clone();
-                render_overlay(frame, &format!(" ✗ {}  [dowolny klawisz] ", msg));
-            }
-            AppState::Idle => {
-                render_overlay(frame, " Naciśnij F5 aby rozpocząć porównanie ");
-            }
+            AppState::Scanning => render_overlay(frame, " ⏳ Skanowanie folderów… "),
+            AppState::Idle => render_overlay(frame, " Naciśnij F5 aby rozpocząć porównanie "),
             AppState::Ready => {}
         }
     }

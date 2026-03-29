@@ -35,20 +35,6 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
 
-    pub fn panel_border_active() -> Style {
-        Style::default().fg(Color::Cyan)
-    }
-
-    pub fn panel_border_inactive() -> Style {
-        Style::default().fg(Color::DarkGray)
-    }
-
-    pub fn panel_title() -> Style {
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD)
-    }
-
     pub fn statusbar() -> Style {
         Style::default().bg(Color::DarkGray).fg(Color::White)
     }
@@ -60,15 +46,16 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
 
-    pub fn header() -> Style {
+    pub fn folder_header() -> Style {
         Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::UNDERLINED)
+            .bg(Color::DarkGray)
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     }
 
-    pub fn dir() -> Style {
+    pub fn header_path() -> Style {
         Style::default()
-            .fg(Color::Blue)
+            .fg(Color::White)
             .add_modifier(Modifier::BOLD)
     }
 }

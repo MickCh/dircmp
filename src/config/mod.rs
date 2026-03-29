@@ -80,11 +80,11 @@ impl Config {
         Ok(config)
     }
 
-    /// Zwraca domyślną ścieżkę do pliku konfiguracji (~/.config/folder-diff/config.toml).
+    /// Zwraca domyślną ścieżkę do pliku konfiguracji (~/.config/dircmp/config.toml).
     pub fn default_path() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("folder-diff")
+            .join("dircmp")
             .join("config.toml")
     }
 }

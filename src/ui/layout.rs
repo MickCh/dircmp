@@ -1,33 +1,29 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 pub struct AppLayout {
-    pub left_panel: Rect,
-    pub right_panel: Rect,
+    /// One-line header showing left and right root paths.
+    pub header: Rect,
+    /// Main content area — the unified diff list.
+    pub main: Rect,
+    /// Two-line status bar at the bottom.
     pub statusbar: Rect,
 }
 
 impl AppLayout {
     pub fn compute(area: Rect) -> Self {
-        let vertical = Layout::default()
+        let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(1),
                 Constraint::Min(0),
                 Constraint::Length(2),
             ])
             .split(area);
 
-        let panels = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(50),
-                Constraint::Percentage(50),
-            ])
-            .split(vertical[0]);
-
         Self {
-            left_panel: panels[0],
-            right_panel: panels[1],
-            statusbar: vertical[1],
+            header: chunks[0],
+            main: chunks[1],
+            statusbar: chunks[2],
         }
     }
 }

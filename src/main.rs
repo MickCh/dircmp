@@ -103,7 +103,7 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
 }
 
 fn usage_str() -> &'static str {
-    "Użycie: folder-diff <lewy_folder> <prawy_folder> [--config <plik>]"
+    "Użycie: dircmp <lewy_folder> <prawy_folder> [--config <plik>]"
 }
 
 fn print_usage() {
@@ -114,9 +114,8 @@ fn print_usage() {
     println!("  -h, --help            Wyświetl tę pomoc");
     println!();
     println!("Klawisze:");
-    println!("  F5          Uruchom porównanie");
+    println!("  F5          Uruchom ponowne porównanie");
     println!("  F           Przełącz filtr (wszystkie / tylko różnice)");
-    println!("  Tab         Przełącz aktywny panel");
     println!("  ↑ / ↓       Nawigacja po wierszach");
     println!("  PgUp/PgDn   Przewijanie");
     println!("  Home/End    Skocz na początek/koniec listy");

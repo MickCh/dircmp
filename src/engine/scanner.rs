@@ -5,17 +5,11 @@ use std::{
 };
 use walkdir::WalkDir;
 
+
 /// Reprezentacja pojedynczego wpisu w folderze (plik lub katalog).
 #[derive(Debug, Clone)]
 pub struct Entry {
-    /// Ścieżka relatywna względem folderu bazowego.
-    pub relative_path: PathBuf,
-    /// Absolutna ścieżka.
-    pub absolute_path: PathBuf,
-    /// Czy to katalog?
     pub is_dir: bool,
-    /// Rozmiar pliku w bajtach (0 dla katalogów).
-    pub size: u64,
 }
 
 /// Mapa: ścieżka relatywna → Entry.
@@ -66,17 +60,8 @@ impl Scanner {
             };
 
             let is_dir = metadata.is_dir();
-            let size = if is_dir { 0 } else { metadata.len() };
 
-            map.insert(
-                relative_path.clone(),
-                Entry {
-                    relative_path,
-                    absolute_path,
-                    is_dir,
-                    size,
-                },
-            );
+            map.insert(relative_path, Entry { is_dir });
         }
 
         map

@@ -1,16 +1,16 @@
 [package]
-name = "folder-diff"
+name = "dircmp"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.75"
+rust-version = "1.85"
 description = "A TUI tool for comparing folder contents"
 
 [[bin]]
-name = "folder-diff"
+name = "dircmp"
 path = "src/main.rs"
 
 [lib]
-name = "folder_diff"
+name = "dircmp"
 path = "src/lib.rs"
 
 [dependencies]

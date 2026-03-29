@@ -38,10 +38,6 @@ impl DiffStatus {
 pub struct DiffEntry {
     pub relative_path: PathBuf,
     pub status: DiffStatus,
-    /// Rozmiar po lewej (None jeśli nie istnieje).
-    pub size_left: Option<u64>,
-    /// Rozmiar po prawej (None jeśli nie istnieje).
-    pub size_right: Option<u64>,
     pub is_dir: bool,
 }
 
@@ -72,9 +68,6 @@ impl DiffResult {
         self.entries.len()
     }
 
-    pub fn differences_count(&self) -> usize {
-        self.entries.iter().filter(|e| e.status.has_difference()).count()
-    }
 }
 
 /// Silnik diffowania – łączy wyniki skanera i komparatora.
@@ -114,22 +107,17 @@ impl<'a> DiffEngine<'a> {
                 (Some(l), None) => DiffEntry {
                     relative_path: path,
                     status: DiffStatus::LeftOnly,
-                    size_left: Some(l.size),
-                    size_right: None,
                     is_dir: l.is_dir,
                 },
                 (None, Some(r)) => DiffEntry {
                     relative_path: path,
                     status: DiffStatus::RightOnly,
-                    size_left: None,
-                    size_right: Some(r.size),
                     is_dir: r.is_dir,
                 },
                 (Some(l), Some(r)) => {
                     let status = if l.is_dir != r.is_dir {
                         DiffStatus::TypeConflict
                     } else if l.is_dir {
-                        // Katalogi – istnieją po obu stronach, nie porównujemy zawartości
                         DiffStatus::DirectoryPresent
                     } else {
                         let abs_left = left_root.join(&path);
@@ -144,8 +132,6 @@ impl<'a> DiffEngine<'a> {
                     DiffEntry {
                         relative_path: path,
                         status,
-                        size_left: Some(l.size),
-                        size_right: Some(r.size),
                         is_dir: l.is_dir,
                     }
                 }
