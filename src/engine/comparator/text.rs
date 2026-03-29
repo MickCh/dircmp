@@ -43,11 +43,11 @@ impl FileComparator for TextComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
         let content_a = match fs::read_to_string(a) {
             Ok(c) => c,
-            Err(e) => return Ok(CompareResult::Error(format!("Błąd odczytu {}: {}", a.display(), e))),
+            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e))),
         };
         let content_b = match fs::read_to_string(b) {
             Ok(c) => c,
-            Err(e) => return Ok(CompareResult::Error(format!("Błąd odczytu {}: {}", b.display(), e))),
+            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e))),
         };
 
         let norm_a = self.normalize(&content_a);
@@ -62,10 +62,10 @@ impl FileComparator for TextComparator {
 
     fn name(&self) -> &str {
         match (self.ignore_whitespace, self.ignore_case) {
-            (true, true) => "tekstowy (bez spacji, bez wielkości liter)",
-            (true, false) => "tekstowy (bez spacji)",
-            (false, true) => "tekstowy (bez wielkości liter)",
-            (false, false) => "tekstowy",
+            (true, true) => "text (ignore whitespace, ignore case)",
+            (true, false) => "text (ignore whitespace)",
+            (false, true) => "text (ignore case)",
+            (false, false) => "text",
         }
     }
 }

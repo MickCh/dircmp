@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod engine;
+mod platform;
 mod ui;
 
 use anyhow::{bail, Context, Result};
@@ -19,33 +20,30 @@ fn main() -> Result<()> {
     let (left_path, right_path, config_path) = parse_args(&args)?;
 
     if !left_path.exists() {
-        bail!("Lewy folder nie istnieje: {}", left_path.display());
+        bail!("Left folder does not exist: {}", left_path.display());
     }
     if !left_path.is_dir() {
-        bail!("Lewa ścieżka nie jest folderem: {}", left_path.display());
+        bail!("Left path is not a directory: {}", left_path.display());
     }
     if !right_path.exists() {
-        bail!("Prawy folder nie istnieje: {}", right_path.display());
+        bail!("Right folder does not exist: {}", right_path.display());
     }
     if !right_path.is_dir() {
-        bail!("Prawa ścieżka nie jest folderem: {}", right_path.display());
+        bail!("Right path is not a directory: {}", right_path.display());
     }
 
     let config_path = config_path.unwrap_or_else(Config::default_path);
     let config = Config::load(&config_path)
-        .context("Błąd ładowania konfiguracji")?;
+        .context("Failed to load configuration")?;
 
-    // Inicjalizacja terminala
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Uruchom aplikację
     let result = run_app(&mut terminal, left_path, right_path, config);
 
-    // Przywróć terminal
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
@@ -74,7 +72,7 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
             "--config" | "-c" => {
                 i += 1;
                 if i >= args.len() {
-                    bail!("Brakuje ścieżki po --config");
+                    bail!("Missing path after --config");
                 }
                 config = Some(PathBuf::from(&args[i]));
             }
@@ -88,36 +86,36 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
                 } else if right.is_none() {
                     right = Some(PathBuf::from(arg));
                 } else {
-                    bail!("Za dużo argumentów");
+                    bail!("Too many arguments");
                 }
             }
-            arg => bail!("Nieznana opcja: {}", arg),
+            arg => bail!("Unknown option: {}", arg),
         }
         i += 1;
     }
 
-    let left = left.ok_or_else(|| anyhow::anyhow!("Brakuje lewego folderu\n{}", usage_str()))?;
-    let right = right.ok_or_else(|| anyhow::anyhow!("Brakuje prawego folderu\n{}", usage_str()))?;
+    let left = left.ok_or_else(|| anyhow::anyhow!("Missing left folder\n{}", usage_str()))?;
+    let right = right.ok_or_else(|| anyhow::anyhow!("Missing right folder\n{}", usage_str()))?;
 
     Ok((left, right, config))
 }
 
 fn usage_str() -> &'static str {
-    "Użycie: dircmp <lewy_folder> <prawy_folder> [--config <plik>]"
+    "Usage: dircmp <left_folder> <right_folder> [--config <file>]"
 }
 
 fn print_usage() {
     println!("{}", usage_str());
     println!();
-    println!("Opcje:");
-    println!("  -c, --config <plik>   Ścieżka do pliku konfiguracji TOML");
-    println!("  -h, --help            Wyświetl tę pomoc");
+    println!("Options:");
+    println!("  -c, --config <file>   Path to TOML configuration file");
+    println!("  -h, --help            Show this help");
     println!();
-    println!("Klawisze:");
-    println!("  F5          Uruchom ponowne porównanie");
-    println!("  F           Przełącz filtr (wszystkie / tylko różnice)");
-    println!("  ↑ / ↓       Nawigacja po wierszach");
-    println!("  PgUp/PgDn   Przewijanie");
-    println!("  Home/End    Skocz na początek/koniec listy");
-    println!("  q           Wyjście");
+    println!("Keys:");
+    println!("  F5          Re-run comparison");
+    println!("  F           Toggle filter (all / differences only)");
+    println!("  ↑ / ↓       Navigate rows");
+    println!("  PgUp/PgDn   Scroll");
+    println!("  Home/End    Jump to first/last entry");
+    println!("  q           Quit");
 }

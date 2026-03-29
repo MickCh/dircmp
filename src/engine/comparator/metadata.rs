@@ -13,11 +13,11 @@ impl FileComparator for MetadataComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
         let meta_a = match std::fs::metadata(a) {
             Ok(m) => m,
-            Err(e) => return Ok(CompareResult::Error(format!("Błąd metadanych {}: {}", a.display(), e))),
+            Err(e) => return Ok(CompareResult::Error(format!("Metadata error {}: {}", a.display(), e))),
         };
         let meta_b = match std::fs::metadata(b) {
             Ok(m) => m,
-            Err(e) => return Ok(CompareResult::Error(format!("Błąd metadanych {}: {}", b.display(), e))),
+            Err(e) => return Ok(CompareResult::Error(format!("Metadata error {}: {}", b.display(), e))),
         };
 
         let size_eq = meta_a.len() == meta_b.len();
@@ -31,6 +31,6 @@ impl FileComparator for MetadataComparator {
     }
 
     fn name(&self) -> &str {
-        "metadata (rozmiar + data)"
+        "metadata (size + mtime)"
     }
 }

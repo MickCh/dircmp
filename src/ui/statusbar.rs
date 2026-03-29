@@ -22,13 +22,16 @@ impl StatusBar {
         filter: &DiffFilter,
     ) {
         let stats = match state {
-            AppState::Idle => " Naciśnij F5 aby porównać foldery".to_string(),
-            AppState::Scanning => " ⏳ Skanowanie…".to_string(),
-            AppState::Comparing => " ⏳ Porównywanie plików…".to_string(),
+            AppState::Idle => " Press F5 to compare folders".to_string(),
+            AppState::Scanning => " ⏳ Scanning…".to_string(),
+            AppState::Comparing { done, total } => {
+                let pct = if *total > 0 { done * 100 / total } else { 0 };
+                format!(" ⏳ Comparing files… ({}/{}) {}%", done, total, pct)
+            }
             AppState::Ready => {
                 if let Some(result) = diff {
                     format!(
-                        " Wpisy: {}  Różne: {}  Lewe: {}  Prawe: {}  Identyczne: {}  | {} | {}",
+                        " Entries: {}  Different: {}  Left only: {}  Right only: {}  Identical: {}  | {} | {}",
                         result.total(),
                         result.different().count(),
                         result.left_only().count(),
@@ -38,22 +41,22 @@ impl StatusBar {
                         filter.label(),
                     )
                 } else {
-                    " Gotowy".to_string()
+                    " Ready".to_string()
                 }
             }
         };
 
         let keys = Line::from(vec![
             Span::styled(" F5", Theme::statusbar_key()),
-            Span::styled(":Porównaj", Theme::statusbar()),
+            Span::styled(":Compare", Theme::statusbar()),
             Span::styled("  F", Theme::statusbar_key()),
-            Span::styled(":Filtr", Theme::statusbar()),
+            Span::styled(":Filter", Theme::statusbar()),
             Span::styled("  ↑↓", Theme::statusbar_key()),
-            Span::styled(":Nawigacja", Theme::statusbar()),
+            Span::styled(":Navigate", Theme::statusbar()),
             Span::styled("  Home/End", Theme::statusbar_key()),
-            Span::styled(":Skocz", Theme::statusbar()),
+            Span::styled(":Jump", Theme::statusbar()),
             Span::styled("  q", Theme::statusbar_key()),
-            Span::styled(":Wyjście ", Theme::statusbar()),
+            Span::styled(":Quit ", Theme::statusbar()),
         ]);
 
         let content = Line::from(vec![Span::styled(stats, Theme::statusbar())]);

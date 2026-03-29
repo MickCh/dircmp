@@ -1,16 +1,22 @@
 [comparison]
-# Strategia porównywania plików: "hash" | "metadata" | "byte" | "text"
+# Comparison strategy: "hash" | "metadata" | "byte" | "text"
 strategy = "hash"
+
+# Use parallel file comparison (SSD-optimised).
+# On Linux this is auto-detected from the filesystem at startup.
+# Set to false for HDD (sequential reads avoid seek overhead).
+# Default: true (assumes SSD, which is the common case today).
+parallel = true
 
 [comparison.text]
 ignore_whitespace = true
 ignore_case = false
 
 [ui]
-# Liczba wierszy na panel
+# Number of rows to scroll per PgUp/PgDn keypress.
 panel_scroll_step = 3
 
 [scan]
-# Pomijane wzorce (glob)
+# Patterns to skip during scanning (matched against entry name).
 ignore_patterns = [".git", ".DS_Store", "Thumbs.db", "node_modules"]
 follow_symlinks = false

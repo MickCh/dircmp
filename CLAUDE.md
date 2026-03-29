@@ -47,7 +47,7 @@ src/
 | `ViewRow` | `ui/panel.rs` | `FolderHeader(String)\|Entry(DiffEntry)` – unified list rows |
 | `DiffView` | `ui/panel.rs` | Single-cursor list widget; `list_state: ListState` |
 | `DiffFilter` | `app.rs` | `All\|DifferencesOnly` – view filter toggled with F |
-| `AppState` | `app.rs` | `Idle\|Scanning\|Ready` |
+| `AppState` | `app.rs` | `Idle\|Scanning\|Comparing{done,total}\|Ready` |
 
 ## Extending: Adding a New Comparator
 
@@ -80,6 +80,7 @@ follow_symlinks = false
 
 - **Two-phase diff:** phase 1 = filesystem scan → list shown immediately with `?` markers; phase 2 = background thread compares files and updates entries live via `mpsc::channel`
 - **Startup:** scan + display runs immediately on launch; F5 re-scans and restarts background comparison
+- **Parallel vs sequential:** SSD → rayon `par_iter` (all CPU cores); HDD → sequential loop (avoids seek overhead). Auto-detected on Linux via `/sys/block/<dev>/queue/rotational`; configurable via `parallel = true/false` in `[comparison]`
 - **Unified list view:** no left/right panel split — one list, one cursor
 - **Folder header bars:** entries grouped by parent directory; each group starts with a full-width colored bar showing the directory path (`./`, `src/`, `src/engine/` etc.)
 - **Directory entries** (`DirectoryPresent`) are skipped — represented only as header bars

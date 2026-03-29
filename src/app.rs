@@ -1,10 +1,11 @@
 use crate::{
     config::Config,
     engine::{
-        comparator::{create_comparator, CompareResult},
+        comparator::{create_comparator, CompareResult, FileComparator},
         diff::{DiffEngine, DiffEntry, DiffStatus},
         scanner::Scanner,
     },
+    platform,
     ui::{
         layout::AppLayout,
         panel::{
@@ -24,7 +25,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Terminal,
 };
-use std::{path::PathBuf, sync::mpsc};
+use std::{path::{Path, PathBuf}, sync::mpsc};
 
 // ---------------------------------------------------------------------------
 // Background comparison channel
@@ -43,7 +44,7 @@ pub enum AppState {
     Idle,
     Scanning,
     /// Files are being compared in a background thread.
-    Comparing,
+    Comparing { done: usize, total: usize },
     Ready,
 }
 
@@ -69,8 +70,8 @@ impl DiffFilter {
 
     pub fn label(&self) -> &'static str {
         match self {
-            DiffFilter::All => "Wszystkie",
-            DiffFilter::DifferencesOnly => "Tylko różnice",
+            DiffFilter::All => "All",
+            DiffFilter::DifferencesOnly => "Differences only",
         }
     }
 
@@ -103,7 +104,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(left_path: PathBuf, right_path: PathBuf, config: Config) -> Self {
+    pub fn new(left_path: PathBuf, right_path: PathBuf, mut config: Config) -> Self {
+        // Auto-detect disk type on Linux; override config if successful.
+        if let Some(rotational) = platform::is_rotational(&left_path) {
+            config.comparison.parallel = !rotational;
+        }
+
         let comparator = create_comparator(&config.comparison);
         let comparator_name = comparator.name().to_string();
 
@@ -167,20 +173,26 @@ impl App {
             return;
         }
 
-        self.state = AppState::Comparing;
+        let total = to_compare.len();
+        self.state = AppState::Comparing { done: 0, total };
         let (tx, rx) = mpsc::channel();
         let comparator = create_comparator(&self.config.comparison);
+        let parallel = self.config.comparison.parallel;
 
         std::thread::spawn(move || {
-            for (rel_path, abs_left, abs_right) in to_compare {
-                let status = match comparator.compare(&abs_left, &abs_right) {
-                    Ok(CompareResult::Identical) => DiffStatus::Identical,
-                    Ok(CompareResult::Different) => DiffStatus::Different,
-                    Ok(CompareResult::Error(e)) => DiffStatus::Error(e),
-                    Err(e) => DiffStatus::Error(e.to_string()),
-                };
-                if tx.send(CompareMsg::Result { path: rel_path, status }).is_err() {
-                    return; // receiver dropped (user pressed F5 or quit)
+            if parallel {
+                use rayon::prelude::*;
+                let par_tx = tx.clone();
+                to_compare.par_iter().for_each_with(par_tx, |tx, (rel, left, right)| {
+                    let status = compare_one(comparator.as_ref(), left, right);
+                    let _ = tx.send(CompareMsg::Result { path: rel.clone(), status });
+                });
+            } else {
+                for (rel, left, right) in &to_compare {
+                    let status = compare_one(comparator.as_ref(), left, right);
+                    if tx.send(CompareMsg::Result { path: rel.clone(), status }).is_err() {
+                        return;
+                    }
                 }
             }
             let _ = tx.send(CompareMsg::Done);
@@ -230,6 +242,9 @@ impl App {
                             entry.status = status;
                             changed = true;
                         }
+                    }
+                    if let AppState::Comparing { done, .. } = &mut self.state {
+                        *done += 1;
                     }
                 }
                 CompareMsg::Done => {
@@ -408,9 +423,9 @@ impl App {
 
         // Overlay for transient states
         match &self.state {
-            AppState::Scanning => render_overlay(frame, " ⏳ Skanowanie folderów… "),
-            AppState::Idle => render_overlay(frame, " Naciśnij F5 aby rozpocząć porównanie "),
-            AppState::Comparing | AppState::Ready => {}
+            AppState::Scanning => render_overlay(frame, " ⏳ Scanning folders… "),
+            AppState::Idle => render_overlay(frame, " Press F5 to start comparison "),
+            AppState::Comparing { .. } | AppState::Ready => {}
         }
     }
 }
@@ -418,6 +433,15 @@ impl App {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn compare_one(comparator: &dyn FileComparator, left: &Path, right: &Path) -> DiffStatus {
+    match comparator.compare(left, right) {
+        Ok(CompareResult::Identical) => DiffStatus::Identical,
+        Ok(CompareResult::Different) => DiffStatus::Different,
+        Ok(CompareResult::Error(e)) => DiffStatus::Error(e),
+        Err(e) => DiffStatus::Error(e.to_string()),
+    }
+}
 
 fn render_overlay(frame: &mut ratatui::Frame, message: &str) {
     let area = frame.area();

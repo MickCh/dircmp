@@ -13,11 +13,11 @@ impl FileComparator for ByteComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
         let bytes_a = match fs::read(a) {
             Ok(b) => b,
-            Err(e) => return Ok(CompareResult::Error(format!("Błąd odczytu {}: {}", a.display(), e))),
+            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e))),
         };
         let bytes_b = match fs::read(b) {
             Ok(b) => b,
-            Err(e) => return Ok(CompareResult::Error(format!("Błąd odczytu {}: {}", b.display(), e))),
+            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e))),
         };
 
         if bytes_a == bytes_b {
@@ -28,6 +28,6 @@ impl FileComparator for ByteComparator {
     }
 
     fn name(&self) -> &str {
-        "bajt po bajcie"
+        "byte-by-byte"
     }
 }

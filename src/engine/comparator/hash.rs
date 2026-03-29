@@ -1,7 +1,7 @@
 use super::{CompareResult, FileComparator};
 use anyhow::Result;
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path};
+use std::{io::Read, path::Path};
 
 #[derive(Default)]
 pub struct HashComparator;
@@ -12,22 +12,42 @@ impl HashComparator {
     }
 
     fn hash_file(path: &Path) -> Result<Vec<u8>> {
-        let bytes = fs::read(path)?;
+        let mut file = std::fs::File::open(path)?;
         let mut hasher = Sha256::new();
-        hasher.update(&bytes);
+        let mut buf = [0u8; 65536]; // 64 KB chunks
+        loop {
+            let n = file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+        }
         Ok(hasher.finalize().to_vec())
     }
 }
 
 impl FileComparator for HashComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
+        // Size check: different sizes → definitely different, skip hashing entirely.
+        match (std::fs::metadata(a), std::fs::metadata(b)) {
+            (Ok(ma), Ok(mb)) => {
+                if ma.len() != mb.len() {
+                    return Ok(CompareResult::Different);
+                }
+                if ma.len() == 0 {
+                    return Ok(CompareResult::Identical);
+                }
+            }
+            _ => {} // metadata unavailable — fall through to hashing
+        }
+
         let hash_a = match Self::hash_file(a) {
             Ok(h) => h,
-            Err(e) => return Ok(CompareResult::Error(format!("Błąd odczytu {}: {}", a.display(), e))),
+            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e))),
         };
         let hash_b = match Self::hash_file(b) {
             Ok(h) => h,
-            Err(e) => return Ok(CompareResult::Error(format!("Błąd odczytu {}: {}", b.display(), e))),
+            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e))),
         };
 
         if hash_a == hash_b {

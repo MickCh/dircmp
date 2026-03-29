@@ -13,6 +13,16 @@ pub struct Config {
 pub struct ComparisonConfig {
     pub strategy: ComparisonStrategy,
     pub text: TextComparisonConfig,
+    /// Use parallel file comparison (SSD-optimised).
+    /// On Linux the value is auto-detected from the filesystem at startup;
+    /// on other platforms this setting is used directly.
+    /// Default: true (assumes SSD, which is the common case today).
+    #[serde(default = "default_true")]
+    pub parallel: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -50,6 +60,7 @@ impl Default for Config {
                     ignore_whitespace: true,
                     ignore_case: false,
                 },
+                parallel: true,
             },
             ui: UiConfig {
                 panel_scroll_step: 3,
@@ -74,9 +85,9 @@ impl Config {
             return Ok(Self::default());
         }
         let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Nie można odczytać pliku konfiguracji: {}", path.display()))?;
+            .with_context(|| format!("Cannot read config file: {}", path.display()))?;
         let config: Self = toml::from_str(&content)
-            .with_context(|| format!("Błąd parsowania pliku konfiguracji: {}", path.display()))?;
+            .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
         Ok(config)
     }
 
