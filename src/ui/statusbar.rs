@@ -24,6 +24,7 @@ impl StatusBar {
         let stats = match state {
             AppState::Idle => " Naciśnij F5 aby porównać foldery".to_string(),
             AppState::Scanning => " ⏳ Skanowanie…".to_string(),
+            AppState::Comparing => " ⏳ Porównywanie plików…".to_string(),
             AppState::Ready => {
                 if let Some(result) = diff {
                     format!(

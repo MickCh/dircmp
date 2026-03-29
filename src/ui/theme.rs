@@ -46,6 +46,10 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
 
+    pub fn pending() -> Style {
+        Style::default().fg(Color::DarkGray)
+    }
+
     pub fn folder_header() -> Style {
         Style::default()
             .bg(Color::DarkGray)

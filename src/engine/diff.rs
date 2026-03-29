@@ -7,6 +7,8 @@ use std::path::PathBuf;
 /// Status pojedynczego wpisu po porównaniu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffStatus {
+    /// Plik oczekuje na porównanie zawartości (faza 2).
+    Pending,
     /// Plik/folder istnieje tylko w lewym folderze.
     LeftOnly,
     /// Plik/folder istnieje tylko w prawym folderze.
@@ -67,30 +69,24 @@ impl DiffResult {
     pub fn total(&self) -> usize {
         self.entries.len()
     }
-
 }
 
-/// Silnik diffowania – łączy wyniki skanera i komparatora.
+/// Pełny komparator – używany w testach integracyjnych i przyszłych zastosowaniach.
 pub struct DiffEngine<'a> {
     comparator: &'a dyn FileComparator,
 }
 
+#[allow(dead_code)]
 impl<'a> DiffEngine<'a> {
     pub fn new(comparator: &'a dyn FileComparator) -> Self {
         Self { comparator }
     }
 
-    /// Porównuje dwie mapy wpisów i zwraca wynik.
-    pub fn diff(
-        &self,
-        left: &EntryMap,
-        right: &EntryMap,
-        left_root: &std::path::Path,
-        right_root: &std::path::Path,
-    ) -> DiffResult {
+    /// Faza 1: buduje strukturę diff bez odczytywania plików.
+    /// Pliki istniejące po obu stronach otrzymują status `Pending`.
+    pub fn diff_structure(left: &EntryMap, right: &EntryMap) -> DiffResult {
         let mut entries = Vec::new();
 
-        // Zbierz wszystkie unikalne ścieżki
         let mut all_paths: Vec<PathBuf> = left.keys().cloned().collect();
         for path in right.keys() {
             if !left.contains_key(path) {
@@ -100,10 +96,7 @@ impl<'a> DiffEngine<'a> {
         all_paths.sort();
 
         for path in all_paths {
-            let left_entry = left.get(&path);
-            let right_entry = right.get(&path);
-
-            let diff_entry = match (left_entry, right_entry) {
+            let diff_entry = match (left.get(&path), right.get(&path)) {
                 (Some(l), None) => DiffEntry {
                     relative_path: path,
                     status: DiffStatus::LeftOnly,
@@ -120,14 +113,7 @@ impl<'a> DiffEngine<'a> {
                     } else if l.is_dir {
                         DiffStatus::DirectoryPresent
                     } else {
-                        let abs_left = left_root.join(&path);
-                        let abs_right = right_root.join(&path);
-                        match self.comparator.compare(&abs_left, &abs_right) {
-                            Ok(CompareResult::Identical) => DiffStatus::Identical,
-                            Ok(CompareResult::Different) => DiffStatus::Different,
-                            Ok(CompareResult::Error(e)) => DiffStatus::Error(e),
-                            Err(e) => DiffStatus::Error(e.to_string()),
-                        }
+                        DiffStatus::Pending
                     };
                     DiffEntry {
                         relative_path: path,
@@ -137,10 +123,33 @@ impl<'a> DiffEngine<'a> {
                 }
                 (None, None) => unreachable!(),
             };
-
             entries.push(diff_entry);
         }
 
         DiffResult { entries }
+    }
+
+    /// Pełne porównanie (używane w testach).
+    pub fn diff(
+        &self,
+        left: &EntryMap,
+        right: &EntryMap,
+        left_root: &std::path::Path,
+        right_root: &std::path::Path,
+    ) -> DiffResult {
+        let mut result = Self::diff_structure(left, right);
+        for entry in &mut result.entries {
+            if entry.status == DiffStatus::Pending {
+                let abs_left = left_root.join(&entry.relative_path);
+                let abs_right = right_root.join(&entry.relative_path);
+                entry.status = match self.comparator.compare(&abs_left, &abs_right) {
+                    Ok(CompareResult::Identical) => DiffStatus::Identical,
+                    Ok(CompareResult::Different) => DiffStatus::Different,
+                    Ok(CompareResult::Error(e)) => DiffStatus::Error(e),
+                    Err(e) => DiffStatus::Error(e.to_string()),
+                };
+            }
+        }
+        result
     }
 }

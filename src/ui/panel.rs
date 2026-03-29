@@ -128,6 +128,12 @@ fn entry_styles(
             Theme::identical(),
             Theme::right_only(),
         ),
+        DiffStatus::Pending => (
+            "?",
+            Theme::pending(),
+            Theme::pending(),
+            Theme::pending(),
+        ),
         DiffStatus::TypeConflict => (
             "!",
             Theme::type_conflict(),

@@ -78,7 +78,8 @@ follow_symlinks = false
 
 ## UI Behavior
 
-- **Startup:** comparison runs immediately on launch; F5 re-runs it
+- **Two-phase diff:** phase 1 = filesystem scan → list shown immediately with `?` markers; phase 2 = background thread compares files and updates entries live via `mpsc::channel`
+- **Startup:** scan + display runs immediately on launch; F5 re-scans and restarts background comparison
 - **Unified list view:** no left/right panel split — one list, one cursor
 - **Folder header bars:** entries grouped by parent directory; each group starts with a full-width colored bar showing the directory path (`./`, `src/`, `src/engine/` etc.)
 - **Directory entries** (`DirectoryPresent`) are skipped — represented only as header bars
