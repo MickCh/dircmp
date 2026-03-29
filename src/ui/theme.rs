@@ -1,13 +1,11 @@
 use ratatui::style::{Color, Modifier, Style};
 
 // Catppuccin Mocha palette
-const MANTLE: Color = Color::Rgb(24, 24, 37);       // #181825
 const SURFACE0: Color = Color::Rgb(49, 50, 68);     // #313244
-const SURFACE1: Color = Color::Rgb(69, 71, 90);     // #45475a
 const OVERLAY0: Color = Color::Rgb(108, 112, 134);  // #6c7086
 const TEXT: Color = Color::Rgb(205, 214, 244);      // #cdd6f4
 const BLUE: Color = Color::Rgb(137, 180, 250);      // #89b4fa
-const TEAL: Color = Color::Rgb(148, 226, 213);      // #94e2d5
+const LAVENDER: Color = Color::Rgb(180, 190, 254);  // #b4befe
 const YELLOW: Color = Color::Rgb(249, 226, 175);    // #f9e2af
 const RED: Color = Color::Rgb(243, 139, 168);       // #f38ba8
 const MAUVE: Color = Color::Rgb(203, 166, 247);     // #cba6f7
@@ -29,7 +27,7 @@ impl Theme {
     }
 
     pub fn identical() -> Style {
-        Style::default().fg(OVERLAY0)
+        Style::default().fg(TEXT)
     }
 
     pub fn type_conflict() -> Style {
@@ -46,35 +44,40 @@ impl Theme {
 
     // UI elements
     pub fn selected() -> Style {
+        // Dark purple-tinted background, lavender text
         Style::default()
-            .bg(SURFACE1)
-            .fg(TEXT)
+            .bg(Color::Rgb(52, 48, 82))
+            .fg(LAVENDER)
             .add_modifier(Modifier::BOLD)
     }
 
     pub fn statusbar() -> Style {
-        Style::default().bg(MANTLE).fg(TEXT)
+        Style::default().bg(SURFACE0).fg(TEXT)
     }
 
     pub fn statusbar_key() -> Style {
         Style::default()
-            .bg(MANTLE)
+            .bg(SURFACE0)
             .fg(BLUE)
             .add_modifier(Modifier::BOLD)
     }
 
     pub fn statusbar_inactive_key() -> Style {
-        Style::default().bg(MANTLE).fg(SURFACE1)
+        Style::default().bg(SURFACE0).fg(OVERLAY0)
     }
 
     pub fn folder_header() -> Style {
+        // Dark navy-tinted background, blue text
         Style::default()
-            .bg(SURFACE0)
-            .fg(TEAL)
+            .bg(Color::Rgb(30, 48, 80))
+            .fg(BLUE)
             .add_modifier(Modifier::BOLD)
     }
 
     pub fn header_path() -> Style {
-        Style::default().fg(TEXT).add_modifier(Modifier::BOLD)
+        Style::default()
+            .bg(Color::Rgb(30, 48, 80))
+            .fg(BLUE)
+            .add_modifier(Modifier::BOLD)
     }
 }
