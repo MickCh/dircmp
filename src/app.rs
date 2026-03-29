@@ -212,16 +212,24 @@ impl App {
     // Background channel polling
     // -----------------------------------------------------------------------
 
-    /// Drains all pending messages from the comparison channel.
+    /// Drains pending messages from the comparison channel (up to MAX_MSGS_PER_POLL).
     /// Returns `true` if any entry was updated (view needs refresh).
     fn poll_comparisons(&mut self) -> bool {
         if self.compare_rx.is_none() {
             return false;
         }
 
+        // Process at most this many messages per call so the UI can refresh
+        // between batches and show incremental progress.
+        const MAX_MSGS_PER_POLL: usize = 2000;
+
         let mut changed = false;
+        let mut count = 0;
 
         loop {
+            if count >= MAX_MSGS_PER_POLL {
+                break;
+            }
             let msg = match self.compare_rx.as_ref().unwrap().try_recv() {
                 Ok(m) => m,
                 Err(mpsc::TryRecvError::Empty) => break,
@@ -236,16 +244,20 @@ impl App {
             match msg {
                 CompareMsg::Result { path, status } => {
                     if let Some(result) = &mut self.diff_result {
-                        if let Some(entry) =
-                            result.entries.iter_mut().find(|e| e.relative_path == path)
+                        // entries are sorted by path (diff_structure calls all_paths.sort()),
+                        // so binary search is O(log n) instead of O(n) linear scan.
+                        if let Ok(idx) = result
+                            .entries
+                            .binary_search_by(|e| e.relative_path.cmp(&path))
                         {
-                            entry.status = status;
+                            result.entries[idx].status = status;
                             changed = true;
                         }
                     }
                     if let AppState::Comparing { done, .. } = &mut self.state {
                         *done += 1;
                     }
+                    count += 1;
                 }
                 CompareMsg::Done => {
                     self.compare_rx = None;
