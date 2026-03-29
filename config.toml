@@ -1,0 +1,16 @@
+[comparison]
+# Strategia porównywania plików: "hash" | "metadata" | "byte" | "text"
+strategy = "hash"
+
+[comparison.text]
+ignore_whitespace = true
+ignore_case = false
+
+[ui]
+# Liczba wierszy na panel
+panel_scroll_step = 3
+
+[scan]
+# Pomijane wzorce (glob)
+ignore_patterns = [".git", ".DS_Store", "Thumbs.db", "node_modules"]
+follow_symlinks = false
