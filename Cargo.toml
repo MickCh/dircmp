@@ -18,7 +18,7 @@ ratatui = "0.29"
 crossterm = "0.28"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-sha2 = "0.10"
+blake3 = "1"
 walkdir = "2"
 anyhow = "1"
 rayon = "1"

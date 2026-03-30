@@ -1,6 +1,5 @@
 use super::{CompareResult, FileComparator};
 use anyhow::Result;
-use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path};
 
 #[derive(Default)]
@@ -11,10 +10,10 @@ impl HashComparator {
         Self
     }
 
-    fn hash_file(path: &Path) -> Result<Vec<u8>> {
+    fn hash_file(path: &Path) -> Result<blake3::Hash> {
         let mut file = std::fs::File::open(path)?;
-        let mut hasher = Sha256::new();
-        let mut buf = [0u8; 65536]; // 64 KB chunks
+        let mut hasher = blake3::Hasher::new();
+        let mut buf = [0u8; 131072]; // 128 KB chunks
         loop {
             let n = file.read(&mut buf)?;
             if n == 0 {
@@ -22,7 +21,7 @@ impl HashComparator {
             }
             hasher.update(&buf[..n]);
         }
-        Ok(hasher.finalize().to_vec())
+        Ok(hasher.finalize())
     }
 }
 
@@ -56,6 +55,6 @@ impl FileComparator for HashComparator {
     }
 
     fn name(&self) -> &str {
-        "hash (SHA-256)"
+        "hash (BLAKE3)"
     }
 }
