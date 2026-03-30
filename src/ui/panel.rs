@@ -14,12 +14,14 @@ use std::path::PathBuf;
 pub enum ViewRow {
     /// A section header showing the directory path.
     FolderHeader(String),
-    /// A file entry with diff status.
-    Entry(DiffEntry),
+    /// Index into the `DiffResult::entries` slice (no owned copy stored here).
+    Entry(usize),
 }
 
 pub struct DiffView {
     pub list_state: ListState,
+    /// First visible row – managed manually to enable virtual scrolling.
+    scroll_offset: usize,
 }
 
 impl Default for DiffView {
@@ -32,31 +34,63 @@ impl DiffView {
     pub fn new() -> Self {
         let mut list_state = ListState::default();
         list_state.select(Some(0));
-        Self { list_state }
+        Self { list_state, scroll_offset: 0 }
     }
 
     pub fn selected_index(&self) -> Option<usize> {
         self.list_state.selected()
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, rows: &[ViewRow]) {
-        let total = area.width as usize;
-        // Symbol column: " ≠ " = 3 chars + 2 spaces = 5
+    pub fn render(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        rows: &[ViewRow],
+        entries: &[DiffEntry],
+    ) {
+        let height = area.height as usize;
+        let n = rows.len();
+
+        if height == 0 || n == 0 {
+            return;
+        }
+
+        let total_width = area.width as usize;
         let symbol_width = 5;
-        let name_total = total.saturating_sub(symbol_width);
+        let name_total = total_width.saturating_sub(symbol_width);
         let left_col = name_total / 2;
         let right_col = name_total - left_col;
 
-        let items: Vec<ListItem> = rows
+        // Clamp selected to a valid row.
+        let selected = self.list_state.selected().unwrap_or(0).min(n - 1);
+
+        // Adjust scroll_offset so that selected stays within the visible window.
+        if selected < self.scroll_offset {
+            self.scroll_offset = selected;
+        } else if selected >= self.scroll_offset + height {
+            self.scroll_offset = selected + 1 - height;
+        }
+
+        let start = self.scroll_offset;
+        let end = (start + height).min(n);
+
+        // Build ListItems ONLY for the visible window (~terminal height rows,
+        // typically 40–60), not for the entire list (potentially 35 000+ rows).
+        let items: Vec<ListItem> = rows[start..end]
             .iter()
             .map(|row| match row {
-                ViewRow::FolderHeader(path) => make_header_item(path, total),
-                ViewRow::Entry(entry) => make_entry_item(entry, left_col, right_col),
+                ViewRow::FolderHeader(path) => make_header_item(path, total_width),
+                ViewRow::Entry(idx) => make_entry_item(&entries[*idx], left_col, right_col),
             })
             .collect();
 
+        // Use a temporary ListState with the selection expressed relative to
+        // our window so ratatui highlights the correct row.
+        let mut render_state = ListState::default();
+        render_state.select(Some(selected - start));
+
         let list = List::new(items).highlight_style(Theme::selected());
-        frame.render_stateful_widget(list, area, &mut self.list_state);
+        frame.render_stateful_widget(list, area, &mut render_state);
     }
 }
 
@@ -156,14 +190,20 @@ fn entry_styles(
     }
 }
 
-/// Builds the list of view rows from diff entries.
-/// Directory entries are skipped — they're represented implicitly via file parent paths.
-pub fn build_view_rows(entries: &[DiffEntry]) -> Vec<ViewRow> {
+/// Builds the list of view rows from `entries`.
+///
+/// `matches` controls which entries are visible (filter predicate).
+/// `ViewRow::Entry(i)` stores the *original index* into `entries` so the
+/// render path can look up the entry without cloning it.
+pub fn build_view_rows<F>(entries: &[DiffEntry], matches: F) -> Vec<ViewRow>
+where
+    F: Fn(&DiffEntry) -> bool,
+{
     let mut rows: Vec<ViewRow> = Vec::new();
     let mut current_parent: Option<PathBuf> = None;
 
-    for entry in entries {
-        if entry.is_dir {
+    for (i, entry) in entries.iter().enumerate() {
+        if entry.is_dir || !matches(entry) {
             continue;
         }
 
@@ -183,7 +223,7 @@ pub fn build_view_rows(entries: &[DiffEntry]) -> Vec<ViewRow> {
             current_parent = Some(parent);
         }
 
-        rows.push(ViewRow::Entry(entry.clone()));
+        rows.push(ViewRow::Entry(i));
     }
 
     rows

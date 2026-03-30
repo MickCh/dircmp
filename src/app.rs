@@ -93,7 +93,6 @@ pub struct App {
     right_root: PathBuf,
     diff_view: DiffView,
     diff_result: Option<crate::engine::diff::DiffResult>,
-    filtered_entries: Vec<DiffEntry>,
     view_rows: Vec<ViewRow>,
     filter: DiffFilter,
     comparator_name: String,
@@ -121,7 +120,6 @@ impl App {
             right_root: right_path,
             diff_view: DiffView::new(),
             diff_result: None,
-            filtered_entries: Vec::new(),
             view_rows: Vec::new(),
             filter: DiffFilter::default(),
             comparator_name,
@@ -285,19 +283,15 @@ impl App {
     fn rebuild_filtered(&mut self) {
         let old_idx = self.diff_view.selected_index();
 
-        self.filtered_entries = self
-            .diff_result
-            .as_ref()
-            .map(|r| {
-                r.entries
-                    .iter()
-                    .filter(|e| self.filter.matches(e))
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        self.view_rows = build_view_rows(&self.filtered_entries);
+        // Build view_rows directly from diff_result without cloning entries.
+        // ViewRow::Entry(i) stores an index into diff_result.entries.
+        let new_rows = if let Some(result) = &self.diff_result {
+            let filter = &self.filter;
+            build_view_rows(&result.entries, |e| filter.matches(e))
+        } else {
+            Vec::new()
+        };
+        self.view_rows = new_rows;
 
         // Preserve cursor position, clamped to valid range.
         let idx = if self.view_rows.is_empty() {
@@ -435,7 +429,12 @@ impl App {
         );
 
         // Diff list
-        self.diff_view.render(frame, layout.main, &self.view_rows);
+        let entries = self
+            .diff_result
+            .as_ref()
+            .map(|r| r.entries.as_slice())
+            .unwrap_or_default();
+        self.diff_view.render(frame, layout.main, &self.view_rows, entries);
 
         // Status bar
         StatusBar::render(
