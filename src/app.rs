@@ -25,6 +25,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Terminal,
 };
+use rayon;
 use std::{path::{Path, PathBuf}, sync::mpsc};
 
 // ---------------------------------------------------------------------------
@@ -143,8 +144,10 @@ impl App {
         self.compare_rx = None;
 
         let scanner = Scanner::new(self.config.scan.clone());
-        let left_map = scanner.scan(&self.left_root);
-        let right_map = scanner.scan(&self.right_root);
+        let (left_map, right_map) = rayon::join(
+            || scanner.scan(&self.left_root),
+            || scanner.scan(&self.right_root),
+        );
 
         let result = DiffEngine::diff_structure(&left_map, &right_map);
         self.diff_result = Some(result);
