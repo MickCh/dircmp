@@ -161,7 +161,7 @@ fn filter_differences_only() {
 
     assert_eq!(result.total(), 3);
 
-    let filter = DiffFilter::DifferencesOnly;
+    let filter = DiffFilter { show_identical: false, ..DiffFilter::default() };
     let filtered: Vec<_> = result.entries.iter().filter(|e| filter.matches(e)).collect();
     assert_eq!(filtered.len(), 2);
     assert!(filtered.iter().all(|e| e.status.has_difference()));
