@@ -68,7 +68,10 @@ impl DiffResult {
     }
 
     pub fn total(&self) -> usize {
-        self.entries.len()
+        self.entries
+            .iter()
+            .filter(|e| !matches!(e.status, DiffStatus::DirectoryPresent))
+            .count()
     }
 }
 
