@@ -102,6 +102,8 @@ pub struct App {
     compare_rx: Option<mpsc::Receiver<CompareMsg>>,
     /// Height of the main list area (updated each frame, used for page navigation).
     page_height: usize,
+    /// Timestamp of the last rebuild_filtered() call; used to throttle rebuilds.
+    last_rebuild: std::time::Instant,
 }
 
 impl App {
@@ -127,6 +129,7 @@ impl App {
             state: AppState::Idle,
             compare_rx: None,
             page_height: 40,
+            last_rebuild: std::time::Instant::now(),
         }
     }
 
@@ -183,10 +186,19 @@ impl App {
         std::thread::spawn(move || {
             if parallel {
                 use rayon::prelude::*;
+                // For I/O-bound comparators (e.g. SHA-256), more than ~8 threads
+                // saturates disk bandwidth without improving throughput.
+                let num_threads = rayon::current_num_threads().min(8);
+                let pool = rayon::ThreadPoolBuilder::new()
+                    .num_threads(num_threads)
+                    .build()
+                    .expect("rayon pool");
                 let par_tx = tx.clone();
-                to_compare.par_iter().for_each_with(par_tx, |tx, (rel, left, right)| {
-                    let status = compare_one(comparator.as_ref(), left, right);
-                    let _ = tx.send(CompareMsg::Result { path: rel.clone(), status });
+                pool.install(|| {
+                    to_compare.par_iter().for_each_with(par_tx, |tx, (rel, left, right)| {
+                        let status = compare_one(comparator.as_ref(), left, right);
+                        let _ = tx.send(CompareMsg::Result { path: rel.clone(), status });
+                    });
                 });
             } else {
                 for (rel, left, right) in &to_compare {
@@ -270,7 +282,14 @@ impl App {
         }
 
         if changed {
-            self.rebuild_filtered();
+            // Rebuilding view_rows iterates all entries (O(n)); throttle to avoid
+            // doing it on every 16 ms frame while the channel is producing fast.
+            let channel_done = self.compare_rx.is_none();
+            let elapsed = self.last_rebuild.elapsed();
+            if channel_done || elapsed >= std::time::Duration::from_millis(200) {
+                self.rebuild_filtered();
+                self.last_rebuild = std::time::Instant::now();
+            }
         }
 
         changed
