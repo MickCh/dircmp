@@ -29,16 +29,14 @@ impl HashComparator {
 impl FileComparator for HashComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
         // Size check: different sizes → definitely different, skip hashing entirely.
-        match (std::fs::metadata(a), std::fs::metadata(b)) {
-            (Ok(ma), Ok(mb)) => {
-                if ma.len() != mb.len() {
-                    return Ok(CompareResult::Different);
-                }
-                if ma.len() == 0 {
-                    return Ok(CompareResult::Identical);
-                }
+        // metadata unavailable — fall through to hashing
+        if let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) {
+            if ma.len() != mb.len() {
+                return Ok(CompareResult::Different);
             }
-            _ => {} // metadata unavailable — fall through to hashing
+            if ma.len() == 0 {
+                return Ok(CompareResult::Identical);
+            }
         }
 
         let hash_a = match Self::hash_file(a) {

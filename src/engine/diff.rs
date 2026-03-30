@@ -25,6 +25,7 @@ pub enum DiffStatus {
     Error(String),
 }
 
+#[allow(dead_code)]
 impl DiffStatus {
     pub fn is_same(&self) -> bool {
         matches!(self, DiffStatus::Identical | DiffStatus::DirectoryPresent)
