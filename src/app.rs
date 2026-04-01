@@ -16,7 +16,11 @@ use crate::{
     },
 };
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use ratatui::{
     backend::Backend,
     layout::{Alignment, Rect},
@@ -35,6 +39,18 @@ use std::{path::{Path, PathBuf}, sync::mpsc};
 enum CompareMsg {
     Result { path: PathBuf, status: DiffStatus },
     Done,
+}
+
+// ---------------------------------------------------------------------------
+// External tool actions
+// ---------------------------------------------------------------------------
+
+enum ExternalAction {
+    Diff { left: PathBuf, right: PathBuf },
+    ViewLeft(PathBuf),
+    EditLeft(PathBuf),
+    ViewRight(PathBuf),
+    EditRight(PathBuf),
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +121,8 @@ pub struct App {
     page_height: usize,
     /// Timestamp of the last rebuild_filtered() call; used to throttle rebuilds.
     last_rebuild: std::time::Instant,
+    /// External tool action to execute after the current frame.
+    pending_action: Option<ExternalAction>,
 }
 
 impl App {
@@ -131,6 +149,7 @@ impl App {
             compare_rx: None,
             page_height: 40,
             last_rebuild: std::time::Instant::now(),
+            pending_action: None,
         }
     }
 
@@ -328,10 +347,65 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
+    // Selection helpers
+    // -----------------------------------------------------------------------
+
+    fn selected_diff_entry(&self) -> Option<&DiffEntry> {
+        let idx = self.diff_view.selected_index()?;
+        match self.view_rows.get(idx)? {
+            ViewRow::Entry(entry_idx) => self.diff_result.as_ref()?.entries.get(*entry_idx),
+            ViewRow::FolderHeader(_) => None,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // External tool launching
+    // -----------------------------------------------------------------------
+
+    fn launch_external<B: Backend + std::io::Write>(
+        &self,
+        terminal: &mut Terminal<B>,
+        action: ExternalAction,
+    ) -> Result<()> {
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+        let result = self.run_external_command(&action);
+
+        enable_raw_mode()?;
+        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+        terminal.clear()?;
+
+        result
+    }
+
+    fn run_external_command(&self, action: &ExternalAction) -> Result<()> {
+        let tools = &self.config.tools;
+        match action {
+            ExternalAction::Diff { left, right } => {
+                if let Some(cmd) = &tools.diff_tool {
+                    launch_cmd(cmd, &[left, right])?;
+                }
+            }
+            ExternalAction::ViewLeft(p) | ExternalAction::ViewRight(p) => {
+                if let Some(cmd) = &tools.viewer {
+                    launch_cmd(cmd, &[p])?;
+                }
+            }
+            ExternalAction::EditLeft(p) | ExternalAction::EditRight(p) => {
+                if let Some(cmd) = &tools.editor {
+                    launch_cmd(cmd, &[p])?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
     // Main loop
     // -----------------------------------------------------------------------
 
-    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
+    pub fn run<B: Backend + std::io::Write>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
         // Show scanning overlay before the blocking filesystem scan.
         self.state = AppState::Scanning;
         terminal.draw(|frame| self.render(frame))?;
@@ -358,6 +432,10 @@ impl App {
                         self.handle_key(key.code);
                     }
                 }
+            }
+
+            if let Some(action) = self.pending_action.take() {
+                self.launch_external(terminal, action)?;
             }
 
             if self.should_quit {
@@ -425,6 +503,42 @@ impl App {
             KeyCode::End => {
                 self.diff_view.list_state.select(Some(last_entry(&self.view_rows)));
             }
+            KeyCode::Enter => {
+                if let Some(entry) = self.selected_diff_entry() {
+                    let left = self.left_root.join(&entry.relative_path);
+                    let right = self.right_root.join(&entry.relative_path);
+                    self.pending_action = match entry.status {
+                        DiffStatus::Different => Some(ExternalAction::Diff { left, right }),
+                        DiffStatus::LeftOnly => Some(ExternalAction::ViewLeft(left)),
+                        DiffStatus::RightOnly => Some(ExternalAction::ViewRight(right)),
+                        _ => None,
+                    };
+                }
+            }
+            KeyCode::Char('v') => {
+                if let Some(entry) = self.selected_diff_entry() {
+                    let path = self.left_root.join(&entry.relative_path);
+                    self.pending_action = Some(ExternalAction::ViewLeft(path));
+                }
+            }
+            KeyCode::Char('V') => {
+                if let Some(entry) = self.selected_diff_entry() {
+                    let path = self.right_root.join(&entry.relative_path);
+                    self.pending_action = Some(ExternalAction::ViewRight(path));
+                }
+            }
+            KeyCode::Char('e') => {
+                if let Some(entry) = self.selected_diff_entry() {
+                    let path = self.left_root.join(&entry.relative_path);
+                    self.pending_action = Some(ExternalAction::EditLeft(path));
+                }
+            }
+            KeyCode::Char('E') => {
+                if let Some(entry) = self.selected_diff_entry() {
+                    let path = self.right_root.join(&entry.relative_path);
+                    self.pending_action = Some(ExternalAction::EditRight(path));
+                }
+            }
             _ => {}
         }
     }
@@ -466,6 +580,7 @@ impl App {
             &self.comparator_name,
             &self.state,
             &self.filter,
+            &self.config.tools,
         );
 
         // Overlay for transient states
@@ -480,6 +595,20 @@ impl App {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn launch_cmd(cmd_str: &str, args: &[&PathBuf]) -> Result<()> {
+    let mut parts = cmd_str.split_whitespace();
+    let program = parts.next().ok_or_else(|| anyhow::anyhow!("empty command"))?;
+    let mut cmd = std::process::Command::new(program);
+    for part in parts {
+        cmd.arg(part);
+    }
+    for path in args {
+        cmd.arg(path);
+    }
+    cmd.status()?;
+    Ok(())
+}
 
 fn compare_one(comparator: &dyn FileComparator, left: &Path, right: &Path) -> DiffStatus {
     match comparator.compare(left, right) {

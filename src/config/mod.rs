@@ -5,8 +5,11 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub comparison: ComparisonConfig,
+    #[serde(default)]
     pub ui: UiConfig,
     pub scan: ScanConfig,
+    #[serde(default)]
+    pub tools: ToolsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -40,9 +43,14 @@ pub struct TextComparisonConfig {
     pub ignore_case: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct UiConfig {
-    pub panel_scroll_step: usize,
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct UiConfig {}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct ToolsConfig {
+    pub diff_tool: Option<String>,
+    pub viewer: Option<String>,
+    pub editor: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -62,9 +70,7 @@ impl Default for Config {
                 },
                 parallel: true,
             },
-            ui: UiConfig {
-                panel_scroll_step: 3,
-            },
+            ui: UiConfig {},
             scan: ScanConfig {
                 ignore_patterns: vec![
                     ".git".to_string(),
@@ -74,6 +80,7 @@ impl Default for Config {
                 ],
                 follow_symlinks: false,
             },
+            tools: ToolsConfig::default(),
         }
     }
 }

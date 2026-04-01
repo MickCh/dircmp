@@ -12,9 +12,10 @@ parallel = true
 ignore_whitespace = true
 ignore_case = false
 
-[ui]
-# Number of rows to scroll per PgUp/PgDn keypress.
-panel_scroll_step = 3
+[tools]
+diff_tool = "nvim -d"
+viewer = "less"
+editor = "nvim"
 
 [scan]
 # Patterns to skip during scanning (matched against entry name).

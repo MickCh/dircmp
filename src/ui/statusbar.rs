@@ -1,5 +1,6 @@
 use crate::{
     app::{AppState, DiffFilter},
+    config::ToolsConfig,
     engine::diff::DiffResult,
     ui::theme::Theme,
 };
@@ -21,6 +22,7 @@ impl StatusBar {
         comparator_name: &str,
         state: &AppState,
         filter: &DiffFilter,
+        tools: &ToolsConfig,
     ) {
         let stats = match state {
             AppState::Idle => " Press F5 to compare folders".to_string(),
@@ -50,7 +52,7 @@ impl StatusBar {
             if active { Theme::statusbar_key() } else { Theme::statusbar_inactive_key() }
         }
 
-        let keys = Line::from(vec![
+        let mut key_spans = vec![
             Span::styled(" F5", Theme::statusbar_key()),
             Span::styled(":Scan", Theme::statusbar()),
             Span::styled("  l", key_style(filter.show_left_only)),
@@ -65,9 +67,22 @@ impl StatusBar {
             Span::styled(":Navigate", Theme::statusbar()),
             Span::styled("  Home/End", Theme::statusbar_key()),
             Span::styled(":Jump", Theme::statusbar()),
-            Span::styled("  q", Theme::statusbar_key()),
-            Span::styled(":Quit ", Theme::statusbar()),
-        ]);
+        ];
+        if tools.diff_tool.is_some() {
+            key_spans.push(Span::styled("  Enter", Theme::statusbar_key()));
+            key_spans.push(Span::styled(":Diff", Theme::statusbar()));
+        }
+        if tools.viewer.is_some() {
+            key_spans.push(Span::styled("  v/V", Theme::statusbar_key()));
+            key_spans.push(Span::styled(":View", Theme::statusbar()));
+        }
+        if tools.editor.is_some() {
+            key_spans.push(Span::styled("  e/E", Theme::statusbar_key()));
+            key_spans.push(Span::styled(":Edit", Theme::statusbar()));
+        }
+        key_spans.push(Span::styled("  q", Theme::statusbar_key()));
+        key_spans.push(Span::styled(":Quit ", Theme::statusbar()));
+        let keys = Line::from(key_spans);
 
         let content = Line::from(vec![Span::styled(stats, Theme::statusbar())]);
         let paragraph = Paragraph::new(vec![content, keys]).style(Theme::statusbar());
