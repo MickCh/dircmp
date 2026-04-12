@@ -1,7 +1,7 @@
 use crate::{
     app::{AppState, DiffFilter},
     config::ToolsConfig,
-    engine::diff::DiffResult,
+    engine::diff::{DiffEntry, DiffResult, DiffStatus},
     ui::theme::Theme,
 };
 use ratatui::{
@@ -23,6 +23,7 @@ impl StatusBar {
         state: &AppState,
         filter: &DiffFilter,
         tools: &ToolsConfig,
+        selected: Option<&DiffEntry>,
     ) {
         let stats = match state {
             AppState::Idle => " Press F5 to compare folders".to_string(),
@@ -48,42 +49,80 @@ impl StatusBar {
             }
         };
 
-        fn key_style(active: bool) -> Style {
+        // Compute per-action availability based on selected entry.
+        let has_left = matches!(
+            selected.map(|e| &e.status),
+            Some(
+                DiffStatus::LeftOnly
+                    | DiffStatus::Different
+                    | DiffStatus::Identical
+                    | DiffStatus::TypeConflict
+                    | DiffStatus::Error(_)
+            )
+        );
+        let has_right = matches!(
+            selected.map(|e| &e.status),
+            Some(
+                DiffStatus::RightOnly
+                    | DiffStatus::Different
+                    | DiffStatus::Identical
+                    | DiffStatus::TypeConflict
+                    | DiffStatus::Error(_)
+            )
+        );
+        let can_enter = match selected.map(|e| &e.status) {
+            Some(DiffStatus::Different) => tools.diff_tool.is_some(),
+            Some(DiffStatus::LeftOnly | DiffStatus::RightOnly) => tools.viewer.is_some(),
+            _ => false,
+        };
+
+        fn key(active: bool) -> Style {
             if active { Theme::statusbar_key() } else { Theme::statusbar_inactive_key() }
+        }
+        fn label(active: bool) -> Style {
+            if active { Theme::statusbar() } else { Theme::statusbar_inactive_key() }
         }
 
         let mut key_spans = vec![
             Span::styled(" F5", Theme::statusbar_key()),
             Span::styled(":Scan", Theme::statusbar()),
-            Span::styled("  l", key_style(filter.show_left_only)),
-            Span::styled(":►", key_style(filter.show_left_only)),
-            Span::styled("  r", key_style(filter.show_right_only)),
-            Span::styled(":◄", key_style(filter.show_right_only)),
-            Span::styled("  d", key_style(filter.show_different)),
-            Span::styled(":≠", key_style(filter.show_different)),
-            Span::styled("  i", key_style(filter.show_identical)),
-            Span::styled(":=", key_style(filter.show_identical)),
+            Span::styled("  l", key(filter.show_left_only)),
+            Span::styled(":►", key(filter.show_left_only)),
+            Span::styled("  r", key(filter.show_right_only)),
+            Span::styled(":◄", key(filter.show_right_only)),
+            Span::styled("  d", key(filter.show_different)),
+            Span::styled(":≠", key(filter.show_different)),
+            Span::styled("  i", key(filter.show_identical)),
+            Span::styled(":=", key(filter.show_identical)),
             Span::styled("  ↑↓", Theme::statusbar_key()),
             Span::styled(":Navigate", Theme::statusbar()),
             Span::styled("  Home/End", Theme::statusbar_key()),
             Span::styled(":Jump", Theme::statusbar()),
         ];
+
         if tools.diff_tool.is_some() {
-            key_spans.push(Span::styled("  Enter", Theme::statusbar_key()));
-            key_spans.push(Span::styled(":Diff", Theme::statusbar()));
+            key_spans.push(Span::styled("  Enter", key(can_enter)));
+            key_spans.push(Span::styled(":Diff", label(can_enter)));
         }
+
         if tools.viewer.is_some() {
-            key_spans.push(Span::styled("  v/V", Theme::statusbar_key()));
-            key_spans.push(Span::styled(":View", Theme::statusbar()));
+            key_spans.push(Span::styled("  [", key(has_left)));
+            key_spans.push(Span::styled("/", Theme::statusbar_inactive_key()));
+            key_spans.push(Span::styled("]", key(has_right)));
+            key_spans.push(Span::styled(":View", label(has_left || has_right)));
         }
+
         if tools.editor.is_some() {
-            key_spans.push(Span::styled("  e/E", Theme::statusbar_key()));
-            key_spans.push(Span::styled(":Edit", Theme::statusbar()));
+            key_spans.push(Span::styled("  {", key(has_left)));
+            key_spans.push(Span::styled("/", Theme::statusbar_inactive_key()));
+            key_spans.push(Span::styled("}", key(has_right)));
+            key_spans.push(Span::styled(":Edit", label(has_left || has_right)));
         }
+
         key_spans.push(Span::styled("  q", Theme::statusbar_key()));
         key_spans.push(Span::styled(":Quit ", Theme::statusbar()));
-        let keys = Line::from(key_spans);
 
+        let keys = Line::from(key_spans);
         let content = Line::from(vec![Span::styled(stats, Theme::statusbar())]);
         let paragraph = Paragraph::new(vec![content, keys]).style(Theme::statusbar());
         frame.render_widget(paragraph, area);

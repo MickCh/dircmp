@@ -515,25 +515,25 @@ impl App {
                     };
                 }
             }
-            KeyCode::Char('v') => {
+            KeyCode::Char('[') => {
                 if let Some(entry) = self.selected_diff_entry() {
                     let path = self.left_root.join(&entry.relative_path);
                     self.pending_action = Some(ExternalAction::ViewLeft(path));
                 }
             }
-            KeyCode::Char('V') => {
+            KeyCode::Char(']') => {
                 if let Some(entry) = self.selected_diff_entry() {
                     let path = self.right_root.join(&entry.relative_path);
                     self.pending_action = Some(ExternalAction::ViewRight(path));
                 }
             }
-            KeyCode::Char('e') => {
+            KeyCode::Char('{') => {
                 if let Some(entry) = self.selected_diff_entry() {
                     let path = self.left_root.join(&entry.relative_path);
                     self.pending_action = Some(ExternalAction::EditLeft(path));
                 }
             }
-            KeyCode::Char('E') => {
+            KeyCode::Char('}') => {
                 if let Some(entry) = self.selected_diff_entry() {
                     let path = self.right_root.join(&entry.relative_path);
                     self.pending_action = Some(ExternalAction::EditRight(path));
@@ -581,6 +581,7 @@ impl App {
             &self.state,
             &self.filter,
             &self.config.tools,
+            self.selected_diff_entry(),
         );
 
         // Overlay for transient states
