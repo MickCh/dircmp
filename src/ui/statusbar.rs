@@ -15,6 +15,7 @@ use ratatui::{
 pub struct StatusBar;
 
 impl StatusBar {
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         frame: &mut Frame,
         area: Rect,

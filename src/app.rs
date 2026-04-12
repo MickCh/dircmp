@@ -29,7 +29,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Terminal,
 };
-use rayon;
 use std::{path::{Path, PathBuf}, sync::mpsc};
 
 // ---------------------------------------------------------------------------
@@ -426,12 +425,11 @@ impl App {
                 std::time::Duration::from_millis(100)
             };
 
-            if event::poll(timeout)? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        self.handle_key(key.code);
-                    }
-                }
+            if event::poll(timeout)?
+                && let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press
+            {
+                self.handle_key(key.code);
             }
 
             if let Some(action) = self.pending_action.take() {
