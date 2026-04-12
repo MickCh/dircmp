@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.94"
 description = "A TUI tool for comparing folder contents"
 license = "MIT"
-authors = ["Michal Chwirut", "Claude Code"]
+authors = ["Michal Chwirut"]
 
 [[bin]]
 name = "dircmp"
