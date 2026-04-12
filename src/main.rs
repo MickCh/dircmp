@@ -32,9 +32,16 @@ fn main() -> Result<()> {
         bail!("Right path is not a directory: {}", right_path.display());
     }
 
-    let config_path = config_path.unwrap_or_else(Config::default_path);
-    let config = Config::load(&config_path)
-        .context("Failed to load configuration")?;
+    let config = match config_path {
+        Some(path) => {
+            if !path.exists() {
+                bail!("Config file not found: {}", path.display());
+            }
+            Config::load(&path).with_context(|| format!("Failed to load config: {}", path.display()))?
+        }
+        None => Config::load_or_create(&Config::default_path())
+            .context("Failed to load configuration")?,
+    };
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

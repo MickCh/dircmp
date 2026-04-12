@@ -14,7 +14,7 @@ ignore_case = false
 
 [tools]
 diff_tool = "nvim -d"
-viewer = "less"
+viewer = "bat --paging=always"
 editor = "nvim"
 
 [scan]

@@ -86,11 +86,8 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Ładuje konfigurację z pliku. Jeśli plik nie istnieje, zwraca domyślną konfigurację.
+    /// Ładuje konfigurację z pliku. Zwraca błąd jeśli plik nie istnieje lub jest nieprawidłowy.
     pub fn load(path: &Path) -> Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Cannot read config file: {}", path.display()))?;
         let config: Self = toml::from_str(&content)
@@ -98,11 +95,32 @@ impl Config {
         Ok(config)
     }
 
-    /// Zwraca domyślną ścieżkę do pliku konfiguracji (~/.config/dircmp/config.toml).
+    /// Ładuje konfigurację z pliku. Jeśli plik nie istnieje, tworzy go z domyślnymi ustawieniami.
+    pub fn load_or_create(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("Cannot create config directory: {}", parent.display()))?;
+            }
+            std::fs::write(path, Self::default_template())
+                .with_context(|| format!("Cannot write default config: {}", path.display()))?;
+            eprintln!("Created default config: {}", path.display());
+        }
+        Self::load(path)
+    }
+
+    /// Zwraca domyślną ścieżkę do pliku konfiguracji.
+    /// Linux/macOS: ~/.config/dircmp/config.toml
+    /// Windows:     %APPDATA%\dircmp\config.toml
     pub fn default_path() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("dircmp")
             .join("config.toml")
+    }
+
+    /// Zwraca domyślną zawartość pliku konfiguracyjnego (TOML z komentarzami).
+    fn default_template() -> &'static str {
+        include_str!("../../config.toml")
     }
 }
