@@ -127,6 +127,12 @@ Then add a variant to `ComparisonStrategy` in `config/mod.rs` and register it in
 cargo test
 ```
 
+## Authorship
+
+The entire codebase was written by [Claude Code](https://claude.ai/code) (Anthropic's AI coding assistant). Michal Chwirut authored the concept, requirements, and all design decisions — but not a single line of source code.
+
+This project is an example of AI-assisted development taken to its logical conclusion: a human providing direction, an AI providing implementation.
+
 ---
 
 *Built with [Claude Code](https://claude.ai/code)*
