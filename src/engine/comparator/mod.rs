@@ -7,28 +7,28 @@ use crate::config::{ComparisonConfig, ComparisonStrategy};
 use anyhow::Result;
 use std::path::Path;
 
-/// Wynik porównania dwóch plików.
+/// Result of comparing two files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompareResult {
-    /// Pliki są identyczne.
+    /// Files are identical.
     Identical,
-    /// Pliki różnią się.
+    /// Files differ.
     Different,
-    /// Nie można porównać (np. błąd odczytu, różne typy).
+    /// Cannot compare (e.g. read error, type mismatch).
     Error(String),
 }
 
-/// Trait definiujący interfejs komparatora plików.
-/// Każda strategia porównywania implementuje ten trait.
+/// Trait defining the file comparator interface.
+/// Each comparison strategy implements this trait.
 pub trait FileComparator: Send + Sync {
-    /// Porównuje dwa pliki i zwraca wynik.
+    /// Compares two files and returns the result.
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult>;
 
-    /// Nazwa strategii (do wyświetlania w UI).
+    /// Strategy name (displayed in the UI).
     fn name(&self) -> &str;
 }
 
-/// Tworzy komparator na podstawie konfiguracji.
+/// Creates a comparator based on the configuration.
 pub fn create_comparator(config: &ComparisonConfig) -> Box<dyn FileComparator> {
     match config.strategy {
         ComparisonStrategy::Hash => Box::new(hash::HashComparator::new()),

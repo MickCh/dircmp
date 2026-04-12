@@ -86,7 +86,7 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Ładuje konfigurację z pliku. Zwraca błąd jeśli plik nie istnieje lub jest nieprawidłowy.
+    /// Loads configuration from a file. Returns an error if the file is missing or invalid.
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Cannot read config file: {}", path.display()))?;
@@ -95,7 +95,7 @@ impl Config {
         Ok(config)
     }
 
-    /// Ładuje konfigurację z pliku. Jeśli plik nie istnieje, tworzy go z domyślnymi ustawieniami.
+    /// Loads configuration from a file. If the file does not exist, creates it with default settings.
     pub fn load_or_create(path: &Path) -> Result<Self> {
         if !path.exists() {
             if let Some(parent) = path.parent() {
@@ -109,7 +109,7 @@ impl Config {
         Self::load(path)
     }
 
-    /// Zwraca domyślną ścieżkę do pliku konfiguracji.
+    /// Returns the default path to the configuration file.
     /// Linux/macOS: ~/.config/dircmp/config.toml
     /// Windows:     %APPDATA%\dircmp\config.toml
     pub fn default_path() -> PathBuf {
@@ -119,7 +119,7 @@ impl Config {
             .join("config.toml")
     }
 
-    /// Zwraca domyślną zawartość pliku konfiguracyjnego (TOML z komentarzami).
+    /// Returns the default configuration file contents (TOML with comments).
     fn default_template() -> &'static str {
         include_str!("../../config.toml")
     }

@@ -6,13 +6,13 @@ use std::{
 use walkdir::WalkDir;
 
 
-/// Reprezentacja pojedynczego wpisu w folderze (plik lub katalog).
+/// A single entry in a folder (file or directory).
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub is_dir: bool,
 }
 
-/// Mapa: ścieżka relatywna → Entry.
+/// Map: relative path → Entry.
 pub type EntryMap = HashMap<PathBuf, Entry>;
 
 pub struct Scanner {
@@ -24,8 +24,8 @@ impl Scanner {
         Self { config }
     }
 
-    /// Skanuje folder rekurencyjnie i zwraca mapę wpisów.
-    /// Błędy dostępu do pojedynczych plików są pomijane (graceful degradation).
+    /// Recursively scans a folder and returns a map of entries.
+    /// Access errors for individual files are skipped (graceful degradation).
     pub fn scan(&self, root: &Path) -> EntryMap {
         let mut map = EntryMap::new();
 
@@ -35,7 +35,7 @@ impl Scanner {
             .filter_entry(|e| !self.is_ignored(e.file_name().to_string_lossy().as_ref()));
 
         for entry in walker {
-            // Błędy dostępu (np. symlinki, brak uprawnień) – pomijamy
+            // Access errors (e.g. broken symlinks, missing permissions) — skip
             let entry = match entry {
                 Ok(e) => e,
                 Err(_) => continue,
@@ -43,7 +43,7 @@ impl Scanner {
 
             let absolute_path = entry.path().to_path_buf();
 
-            // Pomiń sam korzeń
+            // Skip the root itself
             if absolute_path == root {
                 continue;
             }
@@ -53,7 +53,7 @@ impl Scanner {
                 .unwrap_or(&absolute_path)
                 .to_path_buf();
 
-            // Metadata może się nie udać przy broken symlinks
+            // Metadata can fail for broken symlinks
             let metadata = match entry.metadata() {
                 Ok(m) => m,
                 Err(_) => continue,

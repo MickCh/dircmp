@@ -23,7 +23,7 @@ impl TextComparator {
         };
 
         if self.ignore_whitespace {
-            // Normalizuj białe znaki: usuń wiodące/końcowe, zastąp wielokrotne spacje jedną
+            // Normalize whitespace: strip leading/trailing, collapse multiple spaces to one
             result = result
                 .lines()
                 .map(|line| {

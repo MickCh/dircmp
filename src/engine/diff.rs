@@ -4,24 +4,24 @@ use crate::engine::{
 };
 use std::path::PathBuf;
 
-/// Status pojedynczego wpisu po porównaniu.
+/// Comparison status of a single entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffStatus {
-    /// Plik oczekuje na porównanie zawartości (faza 2).
+    /// File is awaiting content comparison (phase 2).
     Pending,
-    /// Plik/folder istnieje tylko w lewym folderze.
+    /// File/directory exists only in the left folder.
     LeftOnly,
-    /// Plik/folder istnieje tylko w prawym folderze.
+    /// File/directory exists only in the right folder.
     RightOnly,
-    /// Pliki są identyczne.
+    /// Files are identical.
     Identical,
-    /// Katalog istnieje po obu stronach.
+    /// Directory exists on both sides.
     DirectoryPresent,
-    /// Pliki różnią się zawartością.
+    /// Files differ in content.
     Different,
-    /// Jeden jest plikiem, drugi katalogiem o tej samej nazwie.
+    /// One side is a file, the other is a directory with the same name.
     TypeConflict,
-    /// Błąd podczas porównywania.
+    /// Error occurred during comparison.
     Error(String),
 }
 
@@ -36,7 +36,7 @@ impl DiffStatus {
     }
 }
 
-/// Wynik porównania pojedynczego wpisu.
+/// Comparison result for a single entry.
 #[derive(Debug, Clone)]
 pub struct DiffEntry {
     pub relative_path: PathBuf,
@@ -44,7 +44,7 @@ pub struct DiffEntry {
     pub is_dir: bool,
 }
 
-/// Pełny wynik porównania dwóch folderów.
+/// Full comparison result for two folder trees.
 #[derive(Debug, Default)]
 pub struct DiffResult {
     pub entries: Vec<DiffEntry>,
@@ -75,7 +75,7 @@ impl DiffResult {
     }
 }
 
-/// Pełny komparator – używany w testach integracyjnych i przyszłych zastosowaniach.
+/// Full diff engine — used in integration tests and future use cases.
 pub struct DiffEngine<'a> {
     comparator: &'a dyn FileComparator,
 }
@@ -86,8 +86,8 @@ impl<'a> DiffEngine<'a> {
         Self { comparator }
     }
 
-    /// Faza 1: buduje strukturę diff bez odczytywania plików.
-    /// Pliki istniejące po obu stronach otrzymują status `Pending`.
+    /// Phase 1: builds the diff structure without reading file contents.
+    /// Files present on both sides are assigned status `Pending`.
     pub fn diff_structure(left: &EntryMap, right: &EntryMap) -> DiffResult {
         let mut entries = Vec::new();
 
@@ -133,7 +133,7 @@ impl<'a> DiffEngine<'a> {
         DiffResult { entries }
     }
 
-    /// Pełne porównanie (używane w testach).
+    /// Full comparison (used in tests).
     pub fn diff(
         &self,
         left: &EntryMap,
