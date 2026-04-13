@@ -28,7 +28,7 @@ src/
 │       └── text.rs      – text with optional whitespace/case normalization
 └── ui/
     ├── layout.rs        – AppLayout: header (1 line) + main + statusbar (2 lines)
-    ├── panel.rs         – DiffView (unified list), ViewRow, build_view_rows(), nav helpers
+    ├── panel.rs         – DiffView (unified list), ViewRow, build_view_rows(), nav helpers (next/prev entry, next/prev matching)
     ├── statusbar.rs     – StatusBar: stats + keybinding hints (dynamic, tool-aware)
     └── theme.rs         – Theme: all Style constants
 ```
@@ -104,6 +104,7 @@ Before the external command runs, the TUI releases raw mode and the alternate sc
 - **Folder header bars:** entries grouped by parent directory; each group starts with a full-width colored bar showing the directory path (`./`, `src/`, `src/engine/` etc.)
 - **Directory entries** (`DirectoryPresent`) are skipped — represented only as header bars
 - **Cursor navigation:** `↑↓ PgUp/PgDn Home/End`; cursor skips folder header rows (lands only on file entries)
+- **Status-based jump:** `n`/`N` jump to the next/previous entry whose status matches the currently selected entry (e.g. standing on a `Different` entry, `n` finds the next `Different`); defaults to `Different` when nothing is selected
 - **Filters:** four independent toggles (L/R/D/I keys) for left-only, right-only, different, identical entries
 - **Overlay:** `Scanning` shows a spinner overlay; `Idle` shows "press F5" hint
 - **No file sizes shown** — removed from `DiffEntry` entirely (not just hidden)
@@ -116,6 +117,7 @@ Before the external command runs, the TUI releases raw mode and the alternate sc
 | `↑` / `↓` | Move cursor one entry (skips folder headers) |
 | `PgUp` / `PgDn` | Jump by page height |
 | `Home` / `End` | Jump to first / last entry |
+| `n` / `N` | Jump to next / previous entry with the same status as the current one |
 | `F5` | Re-scan both folders and restart comparison |
 | `Enter` | Smart open: Different → diff_tool; LeftOnly → viewer (left); RightOnly → viewer (right) |
 | `[` / `]` | View left / right file with viewer |

@@ -272,3 +272,55 @@ pub fn last_entry(rows: &[ViewRow]) -> usize {
         .rposition(|r| matches!(r, ViewRow::Entry(_)))
         .unwrap_or(0)
 }
+
+/// Returns the next index pointing to an Entry row whose `DiffEntry` satisfies `pred`,
+/// or `current` if no such row is found after the current position.
+pub fn next_entry_matching<F>(
+    rows: &[ViewRow],
+    entries: &[DiffEntry],
+    current: usize,
+    pred: F,
+) -> usize
+where
+    F: Fn(&DiffEntry) -> bool,
+{
+    let mut i = current + 1;
+    while i < rows.len() {
+        if let ViewRow::Entry(idx) = &rows[i] {
+            if pred(&entries[*idx]) {
+                return i;
+            }
+        }
+        i += 1;
+    }
+    current
+}
+
+/// Returns the previous index pointing to an Entry row whose `DiffEntry` satisfies `pred`,
+/// or `current` if no such row is found before the current position.
+pub fn prev_entry_matching<F>(
+    rows: &[ViewRow],
+    entries: &[DiffEntry],
+    current: usize,
+    pred: F,
+) -> usize
+where
+    F: Fn(&DiffEntry) -> bool,
+{
+    if current == 0 {
+        return current;
+    }
+    let mut i = current - 1;
+    loop {
+        if let ViewRow::Entry(idx) = &rows[i] {
+            if pred(&entries[*idx]) {
+                return i;
+            }
+        }
+        if i == 0 {
+            break;
+        }
+        i -= 1;
+    }
+    current
+}

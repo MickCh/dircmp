@@ -80,4 +80,5 @@ impl Theme {
             .fg(BLUE)
             .add_modifier(Modifier::BOLD)
     }
+
 }

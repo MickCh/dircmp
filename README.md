@@ -43,6 +43,7 @@ dircmp /backup/docs /current/docs --config ~/.config/dircmp/config.toml
 | `↑` / `↓`  | Navigate entries (skips folder headers)                         |
 | `PgUp/PgDn` | Scroll by page height                                           |
 | `Home/End`  | Jump to first/last entry                                        |
+| `n` / `N`   | Jump to next/previous entry with the same status as current     |
 | `Enter`     | Open: Different → diff tool; LeftOnly/RightOnly → viewer        |
 | `[` / `]`   | View left / right file with viewer                              |
 | `{` / `}`   | Edit left / right file with editor                              |

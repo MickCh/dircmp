@@ -9,7 +9,8 @@ use crate::{
     ui::{
         layout::AppLayout,
         panel::{
-            build_view_rows, first_entry, last_entry, next_entry, prev_entry, DiffView, ViewRow,
+            build_view_rows, first_entry, last_entry, next_entry, next_entry_matching,
+            prev_entry, prev_entry_matching, DiffView, ViewRow,
         },
         statusbar::StatusBar,
         theme::Theme,
@@ -471,6 +472,8 @@ impl App {
                 self.filter.show_identical = !self.filter.show_identical;
                 self.rebuild_filtered();
             }
+            KeyCode::Char('n') => self.jump_to_matching(true),
+            KeyCode::Char('N') => self.jump_to_matching(false),
             KeyCode::Down => {
                 let cur = self.diff_view.selected_index().unwrap_or(0);
                 let next = next_entry(&self.view_rows, cur);
@@ -541,6 +544,31 @@ impl App {
         }
     }
 
+    /// Jumps to the next (`forward = true`) or previous entry whose status matches
+    /// the discriminant of the currently selected entry (defaults to `Different`).
+    fn jump_to_matching(&mut self, forward: bool) {
+        let cur = self.diff_view.selected_index().unwrap_or(0);
+        let target = self
+            .selected_diff_entry()
+            .map(|e| std::mem::discriminant(&e.status))
+            .unwrap_or_else(|| std::mem::discriminant(&DiffStatus::Different));
+        let entries = self
+            .diff_result
+            .as_ref()
+            .map(|r| r.entries.as_slice())
+            .unwrap_or_default();
+        let idx = if forward {
+            next_entry_matching(&self.view_rows, entries, cur, |e| {
+                std::mem::discriminant(&e.status) == target
+            })
+        } else {
+            prev_entry_matching(&self.view_rows, entries, cur, |e| {
+                std::mem::discriminant(&e.status) == target
+            })
+        };
+        self.diff_view.list_state.select(Some(idx));
+    }
+
     // -----------------------------------------------------------------------
     // Rendering
     // -----------------------------------------------------------------------
@@ -588,6 +616,7 @@ impl App {
             AppState::Idle => render_overlay(frame, " Press F5 to start comparison "),
             AppState::Comparing { .. } | AppState::Ready => {}
         }
+
     }
 }
 

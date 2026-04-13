@@ -76,7 +76,6 @@ impl StatusBar {
             Some(DiffStatus::LeftOnly | DiffStatus::RightOnly) => tools.viewer.is_some(),
             _ => false,
         };
-
         fn key(active: bool) -> Style {
             if active { Theme::statusbar_key() } else { Theme::statusbar_inactive_key() }
         }
@@ -97,6 +96,8 @@ impl StatusBar {
             Span::styled(":=", key(filter.show_identical)),
             Span::styled("  ↑↓", Theme::statusbar_key()),
             Span::styled(":Navigate", Theme::statusbar()),
+            Span::styled("  n/N", Theme::statusbar_key()),
+            Span::styled(":Next/Prev", Theme::statusbar()),
             Span::styled("  Home/End", Theme::statusbar_key()),
             Span::styled(":Jump", Theme::statusbar()),
         ];
