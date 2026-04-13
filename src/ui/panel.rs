@@ -286,10 +286,10 @@ where
 {
     let mut i = current + 1;
     while i < rows.len() {
-        if let ViewRow::Entry(idx) = &rows[i] {
-            if pred(&entries[*idx]) {
-                return i;
-            }
+        if let ViewRow::Entry(idx) = &rows[i]
+            && pred(&entries[*idx])
+        {
+            return i;
         }
         i += 1;
     }
@@ -312,10 +312,10 @@ where
     }
     let mut i = current - 1;
     loop {
-        if let ViewRow::Entry(idx) = &rows[i] {
-            if pred(&entries[*idx]) {
-                return i;
-            }
+        if let ViewRow::Entry(idx) = &rows[i]
+            && pred(&entries[*idx])
+        {
+            return i;
         }
         if i == 0 {
             break;
