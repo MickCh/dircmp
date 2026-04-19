@@ -1,5 +1,7 @@
 # dircmp
 
+[![CI](https://github.com/MickCh/dircmp/actions/workflows/ci.yml/badge.svg)](https://github.com/MickCh/dircmp/actions/workflows/ci.yml)
+
 A TUI tool for comparing the contents of two folders. Works on Linux and Windows.
 
 ## Features
@@ -7,7 +9,7 @@ A TUI tool for comparing the contents of two folders. Works on Linux and Windows
 - Recursive folder scanning with live two-phase comparison (structure first, then content)
 - Unified list view with folder section headers (inspired by Total Commander)
 - Configurable file comparison strategies:
-  - **hash** – SHA-256 (default, most accurate)
+  - **hash** – BLAKE3 (default, most accurate)
   - **metadata** – size + modification date (fast)
   - **byte** – byte-by-byte
   - **text** – text-based with optional whitespace/case normalization
@@ -75,7 +77,7 @@ Created automatically with defaults if absent.
 ```toml
 [comparison]
 strategy = "hash"   # hash | metadata | byte | text
-parallel = true     # false recommended for HDDs
+parallel = true     # false recommended for HDDs (auto-detected on Linux; set manually on Windows)
 
 [comparison.text]
 ignore_whitespace = true
@@ -103,6 +105,8 @@ editor    = "nvim"             →  nvim /path/to/file
 ```
 
 The terminal is suspended while the external tool runs and fully restored on exit.
+
+> **Known limitation:** splitting is done on whitespace, so program paths containing spaces (e.g. `/my tools/nvim`) are not supported.
 
 ## Adding a New Comparison Strategy
 
