@@ -380,7 +380,10 @@ impl App {
         &self,
         terminal: &mut Terminal<B>,
         action: ExternalAction,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        B::Error: Send + Sync + 'static,
+    {
         disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
@@ -419,7 +422,10 @@ impl App {
     // Main loop
     // -----------------------------------------------------------------------
 
-    pub fn run<B: Backend + std::io::Write>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
+    pub fn run<B: Backend + std::io::Write>(&mut self, terminal: &mut Terminal<B>) -> Result<()>
+    where
+        B::Error: Send + Sync + 'static,
+    {
         // Show scanning overlay before the blocking filesystem scan.
         self.state = AppState::Scanning;
         terminal.draw(|frame| self.render(frame))?;
