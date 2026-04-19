@@ -3,7 +3,7 @@ use crate::{
     engine::{
         comparator::{create_comparator, CompareResult, FileComparator},
         diff::{DiffEngine, DiffEntry, DiffStatus},
-        scanner::Scanner,
+        scanner::{EntryMap, Scanner},
     },
     platform,
     ui::{
@@ -39,6 +39,10 @@ use std::{path::{Path, PathBuf}, sync::{mpsc, Arc}};
 enum CompareMsg {
     Result { path: PathBuf, status: DiffStatus },
     Done,
+}
+
+enum ScanMsg {
+    Done { left_map: EntryMap, right_map: EntryMap, errors: usize },
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +119,8 @@ pub struct App {
     comparator_name: String,
     should_quit: bool,
     state: AppState,
+    /// Receiver for background scan results.
+    scan_rx: Option<mpsc::Receiver<ScanMsg>>,
     /// Receiver for background comparison results.
     compare_rx: Option<mpsc::Receiver<CompareMsg>>,
     /// Height of the main list area (updated each frame, used for page navigation).
@@ -125,6 +131,10 @@ pub struct App {
     pending_action: Option<ExternalAction>,
     /// Shared rayon pool for parallel file comparison — created once, reused across F5 rescans.
     rayon_pool: Arc<rayon::ThreadPool>,
+    /// Total scan errors (skipped entries) from the last scan.
+    scan_errors: usize,
+    /// Transient message shown in the status bar (e.g. non-zero tool exit).
+    status_message: Option<String>,
 }
 
 impl App {
@@ -156,11 +166,14 @@ impl App {
             comparator_name,
             should_quit: false,
             state: AppState::Idle,
+            scan_rx: None,
             compare_rx: None,
             page_height: 40,
             last_rebuild: std::time::Instant::now(),
             pending_action: None,
             rayon_pool,
+            scan_errors: 0,
+            status_message: None,
         }
     }
 
@@ -168,25 +181,58 @@ impl App {
     // Diff phases
     // -----------------------------------------------------------------------
 
-    /// Phase 1: filesystem scan + structure diff (no file reading). Fast.
-    ///
-    /// NOTE: This runs synchronously on the UI thread. For very large trees (tens of
-    /// thousands of files on a slow disk) the UI will freeze for the scan duration.
-    /// A future improvement would be to move the scan to a background thread and feed
-    /// results back via a channel, similar to phase-2 comparison.
-    fn scan_and_build_structure(&mut self) {
-        // Cancel any ongoing background comparison.
+    /// Phase 1: spawns a background thread that scans both folder trees in parallel.
+    /// The UI remains responsive while scanning; results arrive via `scan_rx`.
+    fn start_background_scan(&mut self) {
+        self.scan_rx = None;
         self.compare_rx = None;
+        self.status_message = None;
 
-        let scanner = Scanner::new(self.config.scan.clone());
-        let (left_map, right_map) = rayon::join(
-            || scanner.scan(&self.left_root),
-            || scanner.scan(&self.right_root),
-        );
+        let (tx, rx) = mpsc::channel();
+        let left_root = self.left_root.clone();
+        let right_root = self.right_root.clone();
+        let scan_config = self.config.scan.clone();
 
+        std::thread::spawn(move || {
+            let scanner = Scanner::new(scan_config);
+            let ((left_map, left_errors), (right_map, right_errors)) = rayon::join(
+                || scanner.scan(&left_root),
+                || scanner.scan(&right_root),
+            );
+            let _ = tx.send(ScanMsg::Done {
+                left_map,
+                right_map,
+                errors: left_errors + right_errors,
+            });
+        });
+
+        self.scan_rx = Some(rx);
+    }
+
+    /// Checks whether the background scan has finished. When done, builds the
+    /// diff structure and kicks off phase-2 comparison. Returns `true` if the
+    /// scan just completed (view needs a full rebuild).
+    fn poll_scan(&mut self) -> bool {
+        let msg = match &self.scan_rx {
+            Some(rx) => match rx.try_recv() {
+                Ok(m) => m,
+                Err(mpsc::TryRecvError::Empty) => return false,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.scan_rx = None;
+                    return false;
+                }
+            },
+            None => return false,
+        };
+
+        let ScanMsg::Done { left_map, right_map, errors } = msg;
+        self.scan_rx = None;
+        self.scan_errors = errors;
         let result = DiffEngine::diff_structure(&left_map, &right_map);
         self.diff_result = Some(result);
         self.rebuild_filtered();
+        self.start_background_comparison();
+        true
     }
 
     /// Phase 2: spawn a background thread that compares Pending entries one
@@ -249,8 +295,7 @@ impl App {
     /// Full re-scan triggered by F5.
     pub fn run_diff(&mut self) {
         self.state = AppState::Scanning;
-        self.scan_and_build_structure();
-        self.start_background_comparison();
+        self.start_background_scan();
     }
 
     // -----------------------------------------------------------------------
@@ -377,7 +422,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn launch_external<B: Backend + std::io::Write>(
-        &self,
+        &mut self,
         terminal: &mut Terminal<B>,
         action: ExternalAction,
     ) -> Result<()>
@@ -393,29 +438,36 @@ impl App {
         execute!(terminal.backend_mut(), EnterAlternateScreen)?;
         terminal.clear()?;
 
-        result
+        self.status_message = result?;
+        Ok(())
     }
 
-    fn run_external_command(&self, action: &ExternalAction) -> Result<()> {
+    fn run_external_command(&self, action: &ExternalAction) -> Result<Option<String>> {
         let tools = &self.config.tools;
-        match action {
+        let msg = match action {
             ExternalAction::Diff { left, right } => {
                 if let Some(cmd) = &tools.diff_tool {
-                    launch_cmd(cmd, &[left, right])?;
+                    launch_cmd(cmd, &[left, right])?
+                } else {
+                    None
                 }
             }
             ExternalAction::ViewLeft(p) | ExternalAction::ViewRight(p) => {
                 if let Some(cmd) = &tools.viewer {
-                    launch_cmd(cmd, &[p])?;
+                    launch_cmd(cmd, &[p])?
+                } else {
+                    None
                 }
             }
             ExternalAction::EditLeft(p) | ExternalAction::EditRight(p) => {
                 if let Some(cmd) = &tools.editor {
-                    launch_cmd(cmd, &[p])?;
+                    launch_cmd(cmd, &[p])?
+                } else {
+                    None
                 }
             }
-        }
-        Ok(())
+        };
+        Ok(msg)
     }
 
     // -----------------------------------------------------------------------
@@ -426,21 +478,18 @@ impl App {
     where
         B::Error: Send + Sync + 'static,
     {
-        // Show scanning overlay before the blocking filesystem scan.
         self.state = AppState::Scanning;
-        terminal.draw(|frame| self.render(frame))?;
-
-        self.scan_and_build_structure();
-        self.start_background_comparison();
+        self.start_background_scan();
 
         loop {
+            self.poll_scan();
             // Drain comparison results before rendering so the frame is fresh.
             self.poll_comparisons();
 
             terminal.draw(|frame| self.render(frame))?;
 
-            // Use a shorter timeout while comparing to keep the UI responsive.
-            let timeout = if self.compare_rx.is_some() {
+            // Use a shorter timeout while scanning or comparing to keep the UI responsive.
+            let timeout = if self.scan_rx.is_some() || self.compare_rx.is_some() {
                 std::time::Duration::from_millis(16)
             } else {
                 std::time::Duration::from_millis(100)
@@ -469,6 +518,7 @@ impl App {
     // -----------------------------------------------------------------------
 
     fn handle_key(&mut self, code: KeyCode) {
+        self.status_message = None;
         match code {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 self.should_quit = true;
@@ -628,6 +678,8 @@ impl App {
             &self.filter,
             &self.config.tools,
             self.selected_diff_entry(),
+            self.scan_errors,
+            self.status_message.as_deref(),
         );
 
         // Overlay for transient states
@@ -644,7 +696,7 @@ impl App {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn launch_cmd(cmd_str: &str, args: &[&PathBuf]) -> Result<()> {
+fn launch_cmd(cmd_str: &str, args: &[&PathBuf]) -> Result<Option<String>> {
     let mut parts = cmd_str.split_whitespace();
     let program = parts.next().ok_or_else(|| anyhow::anyhow!("empty command"))?;
     let mut cmd = std::process::Command::new(program);
@@ -654,8 +706,12 @@ fn launch_cmd(cmd_str: &str, args: &[&PathBuf]) -> Result<()> {
     for path in args {
         cmd.arg(path);
     }
-    cmd.status()?;
-    Ok(())
+    let status = cmd.status()?;
+    if status.success() {
+        Ok(None)
+    } else {
+        Ok(Some(format!("Tool exited with {status}")))
+    }
 }
 
 fn compare_one(comparator: &dyn FileComparator, left: &Path, right: &Path) -> DiffStatus {

@@ -31,8 +31,8 @@ fn identical_folders() {
     fs::write(right.path().join("a.txt"), b"hello").unwrap();
 
     let scanner = Scanner::new(default_scan_config());
-    let left_map = scanner.scan(left.path());
-    let right_map = scanner.scan(right.path());
+    let (left_map, _) = scanner.scan(left.path());
+    let (right_map, _) = scanner.scan(right.path());
 
     let comparator = HashComparator::new();
     let engine = DiffEngine::new(&comparator);
@@ -52,8 +52,8 @@ fn different_file_content() {
     fs::write(right.path().join("a.txt"), b"world").unwrap();
 
     let scanner = Scanner::new(default_scan_config());
-    let left_map = scanner.scan(left.path());
-    let right_map = scanner.scan(right.path());
+    let (left_map, _) = scanner.scan(left.path());
+    let (right_map, _) = scanner.scan(right.path());
 
     let comparator = HashComparator::new();
     let engine = DiffEngine::new(&comparator);
@@ -72,8 +72,8 @@ fn left_only_file() {
     fs::write(left.path().join("only_left.txt"), b"data").unwrap();
 
     let scanner = Scanner::new(default_scan_config());
-    let left_map = scanner.scan(left.path());
-    let right_map = scanner.scan(right.path());
+    let (left_map, _) = scanner.scan(left.path());
+    let (right_map, _) = scanner.scan(right.path());
 
     let comparator = HashComparator::new();
     let engine = DiffEngine::new(&comparator);
@@ -91,8 +91,8 @@ fn right_only_file() {
     fs::write(right.path().join("only_right.txt"), b"data").unwrap();
 
     let scanner = Scanner::new(default_scan_config());
-    let left_map = scanner.scan(left.path());
-    let right_map = scanner.scan(right.path());
+    let (left_map, _) = scanner.scan(left.path());
+    let (right_map, _) = scanner.scan(right.path());
 
     let comparator = HashComparator::new();
     let engine = DiffEngine::new(&comparator);
@@ -115,7 +115,7 @@ fn ignore_patterns() {
         follow_symlinks: false,
     };
     let scanner = Scanner::new(config);
-    let map = scanner.scan(left.path());
+    let (map, _) = scanner.scan(left.path());
 
     assert!(!map.keys().any(|p: &PathBuf| p.to_string_lossy().contains(".git")));
     assert!(map.keys().any(|p: &PathBuf| p.to_string_lossy().contains("a.txt")));
@@ -158,8 +158,8 @@ fn filter_differences_only() {
     fs::write(left.path().join("left_only.txt"), b"only").unwrap();
 
     let scanner = Scanner::new(default_scan_config());
-    let left_map = scanner.scan(left.path());
-    let right_map = scanner.scan(right.path());
+    let (left_map, _) = scanner.scan(left.path());
+    let (right_map, _) = scanner.scan(right.path());
 
     let comparator = HashComparator::new();
     let engine = DiffEngine::new(&comparator);
@@ -327,8 +327,8 @@ fn type_conflict_file_vs_directory() {
     fs::create_dir(right.path().join("thing")).unwrap();
 
     let scanner = Scanner::new(default_scan_config());
-    let left_map = scanner.scan(left.path());
-    let right_map = scanner.scan(right.path());
+    let (left_map, _) = scanner.scan(left.path());
+    let (right_map, _) = scanner.scan(right.path());
 
     let comparator = HashComparator::new();
     let engine = DiffEngine::new(&comparator);
@@ -351,7 +351,7 @@ fn scanner_recurses_into_subdirectories() {
     fs::write(dir.path().join("sub").join("nested.txt"), b"nested").unwrap();
 
     let scanner = Scanner::new(default_scan_config());
-    let map = scanner.scan(dir.path());
+    let (map, _) = scanner.scan(dir.path());
 
     assert!(map.contains_key(Path::new("root.txt")));
     assert!(map.contains_key(Path::new("sub/nested.txt")));

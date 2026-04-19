@@ -50,6 +50,9 @@ pub struct DiffEntry {
 #[derive(Debug, Default)]
 pub struct DiffResult {
     pub entries: Vec<DiffEntry>,
+    /// Number of non-directory entries; computed once in diff_structure (DirectoryPresent
+    /// entries never change status, so this count is stable for the lifetime of the result).
+    file_count: usize,
 }
 
 impl DiffResult {
@@ -70,10 +73,7 @@ impl DiffResult {
     }
 
     pub fn total(&self) -> usize {
-        self.entries
-            .iter()
-            .filter(|e| !matches!(e.status, DiffStatus::DirectoryPresent))
-            .count()
+        self.file_count
     }
 }
 
@@ -132,7 +132,11 @@ impl<'a> DiffEngine<'a> {
             entries.push(diff_entry);
         }
 
-        DiffResult { entries }
+        let file_count = entries
+            .iter()
+            .filter(|e| !matches!(e.status, DiffStatus::DirectoryPresent))
+            .count();
+        DiffResult { entries, file_count }
     }
 
     /// Full comparison (used in tests).

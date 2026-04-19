@@ -25,27 +25,39 @@ impl StatusBar {
         filter: &DiffFilter,
         tools: &ToolsConfig,
         selected: Option<&DiffEntry>,
+        scan_errors: usize,
+        status_message: Option<&str>,
     ) {
-        let stats = match state {
-            AppState::Idle => " Press F5 to compare folders".to_string(),
-            AppState::Scanning => " ⏳ Scanning…".to_string(),
-            AppState::Comparing { done, total } => {
-                let pct = if *total > 0 { done * 100 / total } else { 0 };
-                format!(" ⏳ Comparing files… ({}/{}) {}%", done, total, pct)
-            }
-            AppState::Ready => {
-                if let Some(result) = diff {
-                    format!(
-                        " Entries: {}  Different: {}  Left only: {}  Right only: {}  Identical: {}  | {}",
-                        result.total(),
-                        result.different().count(),
-                        result.left_only().count(),
-                        result.right_only().count(),
-                        result.identical().count(),
-                        comparator_name,
-                    )
-                } else {
-                    " Ready".to_string()
+        let stats = if let Some(msg) = status_message {
+            format!(" ⚠ {msg}")
+        } else {
+            match state {
+                AppState::Idle => " Press F5 to compare folders".to_string(),
+                AppState::Scanning => " ⏳ Scanning…".to_string(),
+                AppState::Comparing { done, total } => {
+                    let pct = if *total > 0 { done * 100 / total } else { 0 };
+                    format!(" ⏳ Comparing files… ({}/{}) {}%", done, total, pct)
+                }
+                AppState::Ready => {
+                    if let Some(result) = diff {
+                        let errors_str = if scan_errors > 0 {
+                            format!("  ⚠ {scan_errors} scan errors")
+                        } else {
+                            String::new()
+                        };
+                        format!(
+                            " Entries: {}  Different: {}  Left only: {}  Right only: {}  Identical: {}  | {}{}",
+                            result.total(),
+                            result.different().count(),
+                            result.left_only().count(),
+                            result.right_only().count(),
+                            result.identical().count(),
+                            comparator_name,
+                            errors_str,
+                        )
+                    } else {
+                        " Ready".to_string()
+                    }
                 }
             }
         };
