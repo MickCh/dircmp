@@ -135,8 +135,8 @@ Keys for external tools are only shown in the status bar when the corresponding 
 ```
  left_filename           ≠   right_filename
  left_filename           =   left_filename
- left_filename           ◄
-                         ►   right_filename
+ left_filename           ►
+                         ◄   right_filename
 ```
 
 Column widths computed dynamically: `left = right = (area.width - 5) / 2`
@@ -148,8 +148,8 @@ Column widths computed dynamically: `left = right = (area.width - 5) / 2`
 | Pending (awaiting comparison) | `?` | Orange |
 | Identical | `=` | Gray |
 | Different | `≠` | Red |
-| LeftOnly | `◄` | Red (right side gray empty) |
-| RightOnly | `►` | Green (left side gray empty) |
+| LeftOnly | `►` | Red (right side gray empty) |
+| RightOnly | `◄` | Green (left side gray empty) |
 | TypeConflict | `!` | Magenta |
 | Error | `✗` | Red bold |
 

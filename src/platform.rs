@@ -24,7 +24,7 @@ fn linux_is_rotational(path: &std::path::Path) -> Option<bool> {
 
     // Standard Linux major/minor extraction from dev_t (64-bit).
     let major = ((dev >> 8) & 0xfff) | ((dev >> 32) & !0xfff_u64);
-    let minor = (dev & 0xff) | ((dev >> 12) & !0xff_u64);
+    let minor = (dev & 0xff) | ((dev >> 12) & 0xffff_ff00);
 
     let sysfs = format!("/sys/dev/block/{}:{}", major, minor);
     let sysfs_path = std::path::Path::new(&sysfs);

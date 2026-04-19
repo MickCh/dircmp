@@ -62,8 +62,8 @@ Keys for external tools are only shown when the tool is configured.
 | Symbol | Color   | Meaning                          |
 |--------|---------|----------------------------------|
 | `?`    | Orange  | Awaiting content comparison      |
-| `◄`    | Red     | File exists only in left folder  |
-| `►`    | Green   | File exists only in right folder |
+| `►`    | Red     | File exists only in left folder  |
+| `◄`    | Green   | File exists only in right folder |
 | `≠`    | Red     | Files differ in content          |
 | `=`    | Gray    | Files are identical              |
 | `!`    | Magenta | Type conflict (file vs directory)|
