@@ -335,6 +335,8 @@ impl App {
         self.view_rows = new_rows;
 
         // Preserve cursor position, clamped to valid range.
+        // Guard: if all entries are filtered out, deselect and bail — idx=0 on an
+        // empty view_rows would be an out-of-bounds selection.
         let idx = if self.view_rows.is_empty() {
             self.diff_view.list_state.select(None);
             return;

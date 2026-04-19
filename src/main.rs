@@ -120,7 +120,11 @@ fn print_usage() {
     println!();
     println!("Keys:");
     println!("  F5          Re-run comparison");
-    println!("  F           Toggle filter (all / differences only)");
+    println!("  L           Toggle left-only filter");
+    println!("  R           Toggle right-only filter");
+    println!("  D           Toggle different filter");
+    println!("  I           Toggle identical filter");
+    println!("  n / N       Jump to next/previous entry with same status");
     println!("  ↑ / ↓       Navigate rows");
     println!("  PgUp/PgDn   Scroll");
     println!("  Home/End    Jump to first/last entry");

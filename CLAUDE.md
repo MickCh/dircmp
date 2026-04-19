@@ -145,12 +145,12 @@ Column widths computed dynamically: `left = right = (area.width - 5) / 2`
 
 | Status | Symbol | Color |
 |--------|--------|-------|
-| Pending (awaiting comparison) | `?` | Orange |
-| Identical | `=` | Gray |
+| Pending (awaiting comparison) | `?` | Gray (dim) |
+| Identical | `=` | White |
 | Different | `≠` | Red |
-| LeftOnly | `►` | Red (right side gray empty) |
-| RightOnly | `◄` | Green (left side gray empty) |
-| TypeConflict | `!` | Magenta |
+| LeftOnly | `►` | Yellow (right side white/empty) |
+| RightOnly | `◄` | Yellow (left side white/empty) |
+| TypeConflict | `!` | Mauve |
 | Error | `✗` | Red bold |
 
 ## User Preferences (from initial design session)
