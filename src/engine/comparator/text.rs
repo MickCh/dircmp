@@ -1,6 +1,10 @@
 use super::{CompareResult, FileComparator};
 use anyhow::Result;
-use std::{fs, path::Path};
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    path::Path,
+};
 
 pub struct TextComparator {
     ignore_whitespace: bool,
@@ -15,48 +19,51 @@ impl TextComparator {
         }
     }
 
-    fn normalize(&self, content: &str) -> String {
-        let mut result = if self.ignore_case {
-            content.to_lowercase()
+    fn normalize_line(&self, line: &str) -> String {
+        let s = if self.ignore_case {
+            line.to_lowercase()
         } else {
-            content.to_string()
+            line.to_string()
         };
 
         if self.ignore_whitespace {
-            // Normalize whitespace: strip leading/trailing, collapse multiple spaces to one
-            result = result
-                .lines()
-                .map(|line| {
-                    line.split_whitespace()
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
+            s.split_whitespace().collect::<Vec<_>>().join(" ")
+        } else {
+            s
         }
-
-        result
     }
 }
 
 impl FileComparator for TextComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
-        let content_a = match fs::read_to_string(a) {
-            Ok(c) => c,
+        let file_a = match File::open(a) {
+            Ok(f) => f,
             Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e))),
         };
-        let content_b = match fs::read_to_string(b) {
-            Ok(c) => c,
+        let file_b = match File::open(b) {
+            Ok(f) => f,
             Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e))),
         };
 
-        let norm_a = self.normalize(&content_a);
-        let norm_b = self.normalize(&content_b);
+        let mut lines_a = BufReader::new(file_a).lines();
+        let mut lines_b = BufReader::new(file_b).lines();
 
-        if norm_a == norm_b {
-            Ok(CompareResult::Identical)
-        } else {
-            Ok(CompareResult::Different)
+        loop {
+            match (lines_a.next(), lines_b.next()) {
+                (None, None) => return Ok(CompareResult::Identical),
+                (Some(Err(e)), _) => {
+                    return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e)))
+                }
+                (_, Some(Err(e))) => {
+                    return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e)))
+                }
+                (Some(Ok(la)), Some(Ok(lb))) => {
+                    if self.normalize_line(&la) != self.normalize_line(&lb) {
+                        return Ok(CompareResult::Different);
+                    }
+                }
+                _ => return Ok(CompareResult::Different),
+            }
         }
     }
 
@@ -77,16 +84,16 @@ mod tests {
     #[test]
     fn normalize_whitespace() {
         let cmp = TextComparator::new(true, false);
-        let a = cmp.normalize("hello   world\n  foo  ");
-        let b = cmp.normalize("hello world\nfoo");
+        let a = cmp.normalize_line("hello   world  ");
+        let b = cmp.normalize_line("hello world");
         assert_eq!(a, b);
     }
 
     #[test]
     fn normalize_case() {
         let cmp = TextComparator::new(false, true);
-        let a = cmp.normalize("Hello World");
-        let b = cmp.normalize("hello world");
+        let a = cmp.normalize_line("Hello World");
+        let b = cmp.normalize_line("hello world");
         assert_eq!(a, b);
     }
 }
