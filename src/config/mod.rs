@@ -47,11 +47,61 @@ pub struct TextComparisonConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct UiConfig {}
 
+/// A tool command: either a whitespace-separated string (e.g. `"nvim -d"`) or an explicit
+/// argument list (e.g. `["my tool", "-d"]`). Use the array form when the program path
+/// contains spaces.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum ToolCommand {
+    String(String),
+    Args(Vec<String>),
+}
+
+impl ToolCommand {
+    /// Returns the program name and its pre-configured arguments.
+    pub fn program_and_args(&self) -> (&str, Vec<&str>) {
+        match self {
+            ToolCommand::String(s) => {
+                let mut parts = s.split_whitespace();
+                let program = parts.next().unwrap_or("");
+                (program, parts.collect())
+            }
+            ToolCommand::Args(v) => {
+                let program = v.first().map(|s| s.as_str()).unwrap_or("");
+                (program, v[1..].iter().map(|s| s.as_str()).collect())
+            }
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ToolCommand {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = ToolCommand;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "a string or array of strings")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<ToolCommand, E> {
+                Ok(ToolCommand::String(v.to_owned()))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<ToolCommand, A::Error> {
+                let mut args = Vec::new();
+                while let Some(s) = seq.next_element::<String>()? {
+                    args.push(s);
+                }
+                Ok(ToolCommand::Args(args))
+            }
+        }
+        d.deserialize_any(Visitor)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ToolsConfig {
-    pub diff_tool: Option<String>,
-    pub viewer: Option<String>,
-    pub editor: Option<String>,
+    pub diff_tool: Option<ToolCommand>,
+    pub viewer: Option<ToolCommand>,
+    pub editor: Option<ToolCommand>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

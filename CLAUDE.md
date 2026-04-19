@@ -28,7 +28,7 @@ src/
 │       └── text.rs      – text with optional whitespace/case normalization
 └── ui/
     ├── layout.rs        – AppLayout: header (1 line) + main + statusbar (2 lines)
-    ├── panel.rs         – DiffView (unified list), ViewRow, build_view_rows(), nav helpers (next/prev entry, next/prev matching)
+    ├── panel.rs         – DiffView (unified list), ViewRow, build_view_rows(), nav helpers (next/prev/nth entry, next/prev matching)
     ├── statusbar.rs     – StatusBar: stats + keybinding hints (dynamic, tool-aware)
     └── theme.rs         – Theme: all Style constants
 ```
@@ -39,7 +39,7 @@ src/
 |------|----------|---------|
 | `EntryMap` | `engine/scanner.rs` | `HashMap<PathBuf, Entry>` – scan result |
 | `Entry` | `engine/scanner.rs` | `{ is_dir: bool }` |
-| `DiffResult` | `engine/diff.rs` | `Vec<DiffEntry>` – full comparison result |
+| `DiffResult` | `engine/diff.rs` | `Vec<DiffEntry>` + cached per-status counts – full comparison result |
 | `DiffEntry` | `engine/diff.rs` | Single entry: `relative_path`, `status`, `is_dir` |
 | `DiffStatus` | `engine/diff.rs` | `Pending\|LeftOnly\|RightOnly\|Identical\|Different\|DirectoryPresent\|TypeConflict\|Error` |
 | `FileComparator` | `engine/comparator/mod.rs` | Trait: `compare(&Path, &Path) -> Result<CompareResult>` |
@@ -81,16 +81,23 @@ viewer = "bat --paging=always"  # invoked on [ (left) or ] (right)
 editor = "nvim"                 # invoked on { (left) or } (right)
 ```
 
-All `[tools]` fields are optional (`Option<String>`). When a tool is not configured, the corresponding key bindings are hidden in the status bar and do nothing.
+All `[tools]` fields are optional. When a tool is not configured, the corresponding key bindings are hidden in the status bar and do nothing.
 
 ### How external tools are invoked
 
-The command string is split by whitespace into a program name plus pre-configured arguments. File path(s) are then **appended as additional positional arguments** — there are no placeholders or shell interpolation.
+Each field accepts either a whitespace-separated string or an explicit argument array. Use the array form when the program path contains spaces:
+
+```toml
+diff_tool = "nvim -d"                # string form — split by whitespace
+diff_tool = ["/my tools/diff", "-d"] # array form — used as-is
+```
+
+File path(s) are **appended as additional positional arguments** — there are no placeholders or shell interpolation.
 
 ```
-diff_tool = "nvim -d"   →  nvim -d /path/to/left /path/to/right
-viewer = "bat --paging=always"  →  bat --paging=always /path/to/file
-editor = "nvim"         →  nvim /path/to/file
+diff_tool = "nvim -d"              →  nvim -d /path/to/left /path/to/right
+viewer = "bat --paging=always"     →  bat --paging=always /path/to/file
+editor = "nvim"                    →  nvim /path/to/file
 ```
 
 Before the external command runs, the TUI releases raw mode and the alternate screen buffer. After the command exits, the terminal is fully restored and the view refreshes.

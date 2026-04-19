@@ -48,10 +48,10 @@ impl StatusBar {
                         format!(
                             " Entries: {}  Different: {}  Left only: {}  Right only: {}  Identical: {}  | {}{}",
                             result.total(),
-                            result.different().count(),
-                            result.left_only().count(),
-                            result.right_only().count(),
-                            result.identical().count(),
+                            result.count_different(),
+                            result.count_left_only(),
+                            result.count_right_only(),
+                            result.count_identical(),
                             comparator_name,
                             errors_str,
                         )

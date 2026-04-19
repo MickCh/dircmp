@@ -10,7 +10,7 @@ use crate::{
         layout::AppLayout,
         panel::{
             build_view_rows, first_entry, last_entry, next_entry, next_entry_matching,
-            prev_entry, prev_entry_matching, DiffView, ViewRow,
+            nth_next_entry, nth_prev_entry, prev_entry, prev_entry_matching, DiffView, ViewRow,
         },
         statusbar::StatusBar,
         theme::Theme,
@@ -94,12 +94,18 @@ impl Default for DiffFilter {
 
 impl DiffFilter {
     pub fn matches(&self, entry: &DiffEntry) -> bool {
-        match entry.status {
+        match &entry.status {
             DiffStatus::LeftOnly => self.show_left_only,
             DiffStatus::RightOnly => self.show_right_only,
             DiffStatus::Different => self.show_different,
             DiffStatus::Identical => self.show_identical,
-            _ => true,
+            // Pending and DirectoryPresent are excluded before reaching this filter
+            // (build_view_rows skips them). TypeConflict and Error have no toggle —
+            // always visible so the user can see what went wrong.
+            DiffStatus::Pending
+            | DiffStatus::DirectoryPresent
+            | DiffStatus::TypeConflict
+            | DiffStatus::Error(_) => true,
         }
     }
 }
@@ -219,6 +225,8 @@ impl App {
                 Err(mpsc::TryRecvError::Empty) => return false,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.scan_rx = None;
+                    self.state = AppState::Ready;
+                    self.status_message = Some("Scan thread crashed unexpectedly".to_string());
                     return false;
                 }
             },
@@ -340,7 +348,7 @@ impl App {
                             .entries
                             .binary_search_by(|e| e.relative_path.cmp(&path))
                         {
-                            result.entries[idx].status = status;
+                            result.update_entry_status(idx, status);
                             changed = true;
                         }
                     }
@@ -429,15 +437,9 @@ impl App {
     where
         B::Error: Send + Sync + 'static,
     {
-        disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-
+        suspend_tui(terminal)?;
         let result = self.run_external_command(&action);
-
-        enable_raw_mode()?;
-        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-        terminal.clear()?;
-
+        resume_tui(terminal)?;
         self.status_message = result?;
         Ok(())
     }
@@ -555,18 +557,12 @@ impl App {
                 self.diff_view.list_state.select(Some(prev));
             }
             KeyCode::PageDown => {
-                let mut idx = self.diff_view.selected_index().unwrap_or(0);
-                for _ in 0..self.page_height {
-                    idx = next_entry(&self.view_rows, idx);
-                }
-                self.diff_view.list_state.select(Some(idx));
+                let idx = self.diff_view.selected_index().unwrap_or(0);
+                self.diff_view.list_state.select(Some(nth_next_entry(&self.view_rows, idx, self.page_height)));
             }
             KeyCode::PageUp => {
-                let mut idx = self.diff_view.selected_index().unwrap_or(0);
-                for _ in 0..self.page_height {
-                    idx = prev_entry(&self.view_rows, idx);
-                }
-                self.diff_view.list_state.select(Some(idx));
+                let idx = self.diff_view.selected_index().unwrap_or(0);
+                self.diff_view.list_state.select(Some(nth_prev_entry(&self.view_rows, idx, self.page_height)));
             }
             KeyCode::Home => {
                 self.diff_view.list_state.select(Some(first_entry(&self.view_rows)));
@@ -696,12 +692,33 @@ impl App {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn launch_cmd(cmd_str: &str, args: &[&PathBuf]) -> Result<Option<String>> {
-    let mut parts = cmd_str.split_whitespace();
-    let program = parts.next().ok_or_else(|| anyhow::anyhow!("empty command"))?;
+fn suspend_tui<B: Backend + std::io::Write>(terminal: &mut Terminal<B>) -> Result<()>
+where
+    B::Error: Send + Sync + 'static,
+{
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    Ok(())
+}
+
+fn resume_tui<B: Backend + std::io::Write>(terminal: &mut Terminal<B>) -> Result<()>
+where
+    B::Error: Send + Sync + 'static,
+{
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.clear()?;
+    Ok(())
+}
+
+fn launch_cmd(tool: &crate::config::ToolCommand, args: &[&PathBuf]) -> Result<Option<String>> {
+    let (program, pre_args) = tool.program_and_args();
+    if program.is_empty() {
+        return Err(anyhow::anyhow!("empty command"));
+    }
     let mut cmd = std::process::Command::new(program);
-    for part in parts {
-        cmd.arg(part);
+    for arg in pre_args {
+        cmd.arg(arg);
     }
     for path in args {
         cmd.arg(path);

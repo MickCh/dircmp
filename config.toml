@@ -13,6 +13,8 @@ ignore_whitespace = true
 ignore_case = false
 
 [tools]
+# String form (split by whitespace) or array form for paths with spaces:
+#   diff_tool = ["/path with spaces/diff", "-d"]
 diff_tool = "nvim -d"
 viewer = "bat --paging=always"
 editor = "nvim"

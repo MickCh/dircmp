@@ -259,6 +259,40 @@ pub fn prev_entry(rows: &[ViewRow], current: usize) -> usize {
     current
 }
 
+/// Advances `n` Entry rows forward in a single pass; stops at the last Entry if fewer remain.
+pub fn nth_next_entry(rows: &[ViewRow], current: usize, n: usize) -> usize {
+    let mut count = 0;
+    let mut result = current;
+    for (i, row) in rows.iter().enumerate().skip(current + 1) {
+        if matches!(row, ViewRow::Entry(_)) {
+            result = i;
+            count += 1;
+            if count == n {
+                return i;
+            }
+        }
+    }
+    result
+}
+
+/// Moves `n` Entry rows backward in a single pass; stops at the first Entry if fewer remain.
+pub fn nth_prev_entry(rows: &[ViewRow], current: usize, n: usize) -> usize {
+    let mut count = 0;
+    let mut result = current;
+    let mut i = current;
+    while i > 0 {
+        i -= 1;
+        if matches!(rows[i], ViewRow::Entry(_)) {
+            result = i;
+            count += 1;
+            if count == n {
+                return i;
+            }
+        }
+    }
+    result
+}
+
 /// Returns the index of the first Entry row, or 0 if there are none.
 pub fn first_entry(rows: &[ViewRow]) -> usize {
     rows.iter()
