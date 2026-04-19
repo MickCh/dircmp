@@ -43,6 +43,7 @@ pub struct TextComparisonConfig {
     pub ignore_case: bool,
 }
 
+// Reserved for future UI settings (e.g. theme selection, column widths).
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct UiConfig {}
 

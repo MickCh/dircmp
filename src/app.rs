@@ -30,7 +30,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Terminal,
 };
-use std::{path::{Path, PathBuf}, sync::mpsc};
+use std::{path::{Path, PathBuf}, sync::{mpsc, Arc}};
 
 // ---------------------------------------------------------------------------
 // Background comparison channel
@@ -123,6 +123,8 @@ pub struct App {
     last_rebuild: std::time::Instant,
     /// External tool action to execute after the current frame.
     pending_action: Option<ExternalAction>,
+    /// Shared rayon pool for parallel file comparison — created once, reused across F5 rescans.
+    rayon_pool: Arc<rayon::ThreadPool>,
 }
 
 impl App {
@@ -134,6 +136,14 @@ impl App {
 
         let comparator = create_comparator(&config.comparison);
         let comparator_name = comparator.name().to_string();
+
+        let num_threads = rayon::current_num_threads().min(8);
+        let rayon_pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .build()
+                .expect("rayon pool"),
+        );
 
         Self {
             config,
@@ -150,6 +160,7 @@ impl App {
             page_height: 40,
             last_rebuild: std::time::Instant::now(),
             pending_action: None,
+            rayon_pool,
         }
     }
 
@@ -158,6 +169,11 @@ impl App {
     // -----------------------------------------------------------------------
 
     /// Phase 1: filesystem scan + structure diff (no file reading). Fast.
+    ///
+    /// NOTE: This runs synchronously on the UI thread. For very large trees (tens of
+    /// thousands of files on a slow disk) the UI will freeze for the scan duration.
+    /// A future improvement would be to move the scan to a background thread and feed
+    /// results back via a channel, similar to phase-2 comparison.
     fn scan_and_build_structure(&mut self) {
         // Cancel any ongoing background comparison.
         self.compare_rx = None;
@@ -204,17 +220,11 @@ impl App {
         let (tx, rx) = mpsc::channel();
         let comparator = create_comparator(&self.config.comparison);
         let parallel = self.config.comparison.parallel;
+        let pool = self.rayon_pool.clone();
 
         std::thread::spawn(move || {
             if parallel {
                 use rayon::prelude::*;
-                // For I/O-bound comparators (e.g. SHA-256), more than ~8 threads
-                // saturates disk bandwidth without improving throughput.
-                let num_threads = rayon::current_num_threads().min(8);
-                let pool = rayon::ThreadPoolBuilder::new()
-                    .num_threads(num_threads)
-                    .build()
-                    .expect("rayon pool");
                 let par_tx = tx.clone();
                 pool.install(|| {
                     to_compare.par_iter().for_each_with(par_tx, |tx, (rel, left, right)| {
@@ -298,6 +308,8 @@ impl App {
                     self.compare_rx = None;
                     self.state = AppState::Ready;
                     changed = true;
+                    // count is not incremented here: Done always breaks the loop
+                    // regardless of MAX_MSGS_PER_POLL, so its value would go unread.
                     break;
                 }
             }

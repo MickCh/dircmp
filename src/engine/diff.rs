@@ -25,12 +25,14 @@ pub enum DiffStatus {
     Error(String),
 }
 
-#[allow(dead_code)]
 impl DiffStatus {
+    // Used in integration tests (tests/engine_tests.rs); not called from binary code.
+    #[allow(dead_code)]
     pub fn is_same(&self) -> bool {
         matches!(self, DiffStatus::Identical | DiffStatus::DirectoryPresent)
     }
 
+    #[allow(dead_code)]
     pub fn has_difference(&self) -> bool {
         !self.is_same()
     }
