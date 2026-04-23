@@ -20,8 +20,16 @@ A TUI tool for comparing the contents of two folders. Works on Linux and Windows
 
 ## Installation
 
+Install directly from GitHub (requires [Rust](https://rustup.rs)):
+
 ```bash
-git clone <repo>
+cargo install --git https://github.com/MickCh/dircmp.git
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/MickCh/dircmp.git
 cd dircmp
 cargo build --release
 # Binary: target/release/dircmp

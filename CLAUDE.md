@@ -4,8 +4,8 @@
 
 A Rust TUI application for comparing two folder trees side-by-side, inspired by Total Commander's sync tool. Targets Linux and Windows.
 
-- **Crate name:** `dircmp` (binary + lib), edition 2024, MSRV 1.94
-- **Key dependencies:** ratatui 0.29, crossterm 0.28, blake3, walkdir, rayon, serde/toml, anyhow, dirs
+- **Crate name:** `dircmp` (binary + lib), edition 2024, MSRV 1.95
+- **Key dependencies:** ratatui 0.30, crossterm 0.29, blake3, walkdir, rayon, serde/toml, anyhow, dirs
 
 ## Architecture
 

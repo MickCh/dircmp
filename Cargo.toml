@@ -2,7 +2,7 @@
 name = "dircmp"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.95"
 description = "A TUI tool for comparing folder contents"
 license = "MIT"
 authors = ["Michal Chwirut"]
@@ -19,12 +19,12 @@ path = "src/lib.rs"
 ratatui = "0.30"
 crossterm = "0.29"
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1"
 blake3 = "1"
 walkdir = "2"
 anyhow = "1"
 rayon = "1"
-dirs = "5"
+dirs = "6"
 
 [profile.release]
 opt-level = 3
