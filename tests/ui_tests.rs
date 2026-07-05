@@ -91,6 +91,29 @@ fn build_rows_directory_entries_are_skipped() {
 }
 
 #[test]
+fn build_rows_shows_directory_type_conflicts_and_one_sided_directories() {
+    // A TypeConflict whose left side is a directory (is_dir = true) and a
+    // directory existing on one side only must both stay visible — only
+    // DirectoryPresent entries are folded into folder headers.
+    let entries = vec![
+        DiffEntry {
+            relative_path: PathBuf::from("thing"),
+            status: DiffStatus::TypeConflict,
+            is_dir: true,
+        },
+        DiffEntry {
+            relative_path: PathBuf::from("empty_dir"),
+            status: DiffStatus::LeftOnly,
+            is_dir: true,
+        },
+        dir_entry("both_sides"),
+    ];
+    let rows = ViewRows::build(&entries, all_match);
+
+    assert_eq!(entry_indices(&rows), vec![0, 1]);
+}
+
+#[test]
 fn build_rows_filter_excludes_non_matching_entries() {
     let entries = vec![
         file_entry("a.txt", DiffStatus::Identical),

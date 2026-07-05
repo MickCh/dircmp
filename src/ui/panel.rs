@@ -39,7 +39,11 @@ impl ViewRows {
         let mut current_parent: Option<PathBuf> = None;
 
         for (i, entry) in entries.iter().enumerate() {
-            if entry.is_dir || !matches(entry) {
+            // Directories present on both sides are represented by folder
+            // headers, not entry rows. Every other status stays visible even
+            // when the entry is a directory (one-sided or type-conflicting
+            // directories would otherwise silently vanish from the list).
+            if entry.status == DiffStatus::DirectoryPresent || !matches(entry) {
                 continue;
             }
 
@@ -308,11 +312,14 @@ fn make_header_item(path: &str, total_width: usize) -> ListItem<'static> {
 }
 
 fn make_entry_item(entry: &DiffEntry, left_col: usize, right_col: usize) -> ListItem<'static> {
-    let name = entry
+    let mut name = entry
         .relative_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| entry.relative_path.to_string_lossy().into_owned());
+    if entry.is_dir {
+        name.push('/');
+    }
 
     let (symbol, sym_style, left_style, right_style) = entry_styles(&entry.status);
 
