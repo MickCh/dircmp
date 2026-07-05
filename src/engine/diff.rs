@@ -71,9 +71,10 @@ impl DiffFilter {
             DiffStatus::RightOnly => self.show_right_only,
             DiffStatus::Different => self.show_different,
             DiffStatus::Identical => self.show_identical,
-            // Pending and DirectoryPresent are excluded before reaching this filter
-            // (ViewRows::build skips them). TypeConflict and Error have no toggle —
-            // always visible so the user can see what went wrong.
+            // Pending, TypeConflict and Error have no toggle — always visible
+            // (Pending as a `?` placeholder, the other two so the user can see
+            // what went wrong). DirectoryPresent never reaches this filter:
+            // ViewRows::build renders directories as folder headers instead.
             DiffStatus::Pending
             | DiffStatus::DirectoryPresent
             | DiffStatus::TypeConflict
@@ -96,23 +97,41 @@ pub struct DiffResult {
 }
 
 impl DiffResult {
+    /// Adjusts the cached count for `status` by ±1. Single place mapping a
+    /// status to its counter — `diff_structure` and `update_entry_status`
+    /// both go through here, so the two can never drift apart.
+    fn bump_count(&mut self, status: &DiffStatus, increment: bool) {
+        let slot = match status {
+            DiffStatus::LeftOnly => &mut self.count_left_only,
+            DiffStatus::RightOnly => &mut self.count_right_only,
+            DiffStatus::Different => &mut self.count_different,
+            DiffStatus::Identical => &mut self.count_identical,
+            DiffStatus::Pending
+            | DiffStatus::DirectoryPresent
+            | DiffStatus::TypeConflict
+            | DiffStatus::Error(_) => return,
+        };
+        if increment {
+            *slot += 1;
+        } else {
+            *slot -= 1;
+        }
+    }
+
     /// Updates a single entry's status and adjusts the cached counts accordingly.
     pub fn update_entry_status(&mut self, idx: usize, new_status: DiffStatus) {
-        match &self.entries[idx].status {
-            DiffStatus::LeftOnly => self.count_left_only -= 1,
-            DiffStatus::RightOnly => self.count_right_only -= 1,
-            DiffStatus::Different => self.count_different -= 1,
-            DiffStatus::Identical => self.count_identical -= 1,
-            _ => {}
-        }
-        match &new_status {
-            DiffStatus::LeftOnly => self.count_left_only += 1,
-            DiffStatus::RightOnly => self.count_right_only += 1,
-            DiffStatus::Different => self.count_different += 1,
-            DiffStatus::Identical => self.count_identical += 1,
-            _ => {}
-        }
-        self.entries[idx].status = new_status;
+        self.bump_count(&new_status, true);
+        let old_status = std::mem::replace(&mut self.entries[idx].status, new_status);
+        self.bump_count(&old_status, false);
+    }
+
+    /// Finds the entry index for `path` via binary search. Relies on the
+    /// invariant that `diff_structure` sorts entries by relative path — kept
+    /// next to the sort so callers don't have to know about it.
+    pub fn find_by_path(&self, path: &Path) -> Option<usize> {
+        self.entries
+            .binary_search_by(|e| e.relative_path.as_path().cmp(path))
+            .ok()
     }
 
     pub fn count_left_only(&self) -> usize { self.count_left_only }
@@ -209,22 +228,15 @@ impl<'a> DiffEngine<'a> {
             entries.push(diff_entry);
         }
 
-        let mut file_count = 0;
-        let mut count_left_only = 0;
-        let mut count_right_only = 0;
-        let mut count_different = 0;
-        let mut count_identical = 0;
-        for e in &entries {
-            match &e.status {
-                DiffStatus::DirectoryPresent => {}
-                DiffStatus::LeftOnly => { file_count += 1; count_left_only += 1; }
-                DiffStatus::RightOnly => { file_count += 1; count_right_only += 1; }
-                DiffStatus::Different => { file_count += 1; count_different += 1; }
-                DiffStatus::Identical => { file_count += 1; count_identical += 1; }
-                _ => { file_count += 1; }
+        let mut result = DiffResult { entries, ..DiffResult::default() };
+        for i in 0..result.entries.len() {
+            let status = result.entries[i].status.clone();
+            if status != DiffStatus::DirectoryPresent {
+                result.file_count += 1;
             }
+            result.bump_count(&status, true);
         }
-        DiffResult { entries, file_count, count_left_only, count_right_only, count_different, count_identical }
+        result
     }
 
     /// Full sequential comparison (phase 1 + phase 2 in one call).
