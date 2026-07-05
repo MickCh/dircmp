@@ -30,10 +30,16 @@ impl Scanner {
         let mut map = EntryMap::new();
         let mut errors: usize = 0;
 
+        // depth 0 exempts the root itself from ignore patterns — filtering
+        // applies to entries *inside* the compared trees, not to the user's
+        // choice of root (comparing two `node_modules` folders directly must
+        // not yield an empty scan).
         let walker = WalkDir::new(root)
             .follow_links(self.config.follow_symlinks)
             .into_iter()
-            .filter_entry(|e| !self.is_ignored(e.file_name().to_string_lossy().as_ref()));
+            .filter_entry(|e| {
+                e.depth() == 0 || !self.is_ignored(e.file_name().to_string_lossy().as_ref())
+            });
 
         for entry in walker {
             let entry = match entry {

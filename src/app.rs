@@ -344,7 +344,12 @@ impl App {
         suspend_tui(terminal)?;
         let result = tools::run_action(&self.config.tools, &action);
         resume_tui(terminal)?;
-        self.status_message = result?;
+        // A tool that fails to launch (missing binary, bad config) is reported
+        // in the status bar; it must not abort the whole session.
+        self.status_message = match result {
+            Ok(msg) => msg,
+            Err(e) => Some(format!("Tool failed: {e:#}")),
+        };
         Ok(())
     }
 
@@ -374,26 +379,8 @@ impl App {
     /// the status bar (which only displays them — the policy lives here).
     fn tool_key_hints(&self) -> ToolKeyHints {
         let status = self.selected_diff_entry().map(|e| &e.status);
-        let has_left = matches!(
-            status,
-            Some(
-                DiffStatus::LeftOnly
-                    | DiffStatus::Different
-                    | DiffStatus::Identical
-                    | DiffStatus::TypeConflict
-                    | DiffStatus::Error(_)
-            )
-        );
-        let has_right = matches!(
-            status,
-            Some(
-                DiffStatus::RightOnly
-                    | DiffStatus::Different
-                    | DiffStatus::Identical
-                    | DiffStatus::TypeConflict
-                    | DiffStatus::Error(_)
-            )
-        );
+        let has_left = status.is_some_and(|s| side_available(s, Side::Left));
+        let has_right = status.is_some_and(|s| side_available(s, Side::Right));
         let enter_enabled = self
             .selected_diff_entry()
             .is_some_and(|e| self.open_action_for(e).is_some());
@@ -519,8 +506,13 @@ impl App {
     }
 
     /// Queues an external action on the selected entry's left or right path.
+    /// Ignored when the entry has no file on that side — same policy the
+    /// status-bar hints are computed from, so the two cannot drift apart.
     fn queue_side_action(&mut self, side: Side, make: fn(PathBuf) -> ExternalAction) {
         let Some(entry) = self.selected_diff_entry() else { return };
+        if !side_available(&entry.status, side) {
+            return;
+        }
         let root = match side {
             Side::Left => &self.left_root,
             Side::Right => &self.right_root,
@@ -614,6 +606,21 @@ enum Side {
     Right,
 }
 
+/// Whether an entry with `status` has something to act on for `side`. The
+/// single policy behind both `queue_side_action` and the `[`/`]`/`{`/`}`
+/// status-bar hints.
+fn side_available(status: &DiffStatus, side: Side) -> bool {
+    match status {
+        DiffStatus::LeftOnly => matches!(side, Side::Left),
+        DiffStatus::RightOnly => matches!(side, Side::Right),
+        DiffStatus::Different
+        | DiffStatus::Identical
+        | DiffStatus::TypeConflict
+        | DiffStatus::Error(_) => true,
+        DiffStatus::Pending | DiffStatus::DirectoryPresent => false,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -675,6 +682,30 @@ mod tests {
         assert_eq!(command_for_key(KeyCode::Char(']')), Some(Command::ViewRight));
         assert_eq!(command_for_key(KeyCode::Char('{')), Some(Command::EditLeft));
         assert_eq!(command_for_key(KeyCode::Char('}')), Some(Command::EditRight));
+    }
+
+    #[test]
+    fn side_available_matches_entry_side() {
+        // One-sided entries only expose their own side.
+        assert!(side_available(&DiffStatus::LeftOnly, Side::Left));
+        assert!(!side_available(&DiffStatus::LeftOnly, Side::Right));
+        assert!(side_available(&DiffStatus::RightOnly, Side::Right));
+        assert!(!side_available(&DiffStatus::RightOnly, Side::Left));
+        // Two-sided entries expose both.
+        for status in [
+            DiffStatus::Different,
+            DiffStatus::Identical,
+            DiffStatus::TypeConflict,
+            DiffStatus::Error(String::new()),
+        ] {
+            assert!(side_available(&status, Side::Left));
+            assert!(side_available(&status, Side::Right));
+        }
+        // Not yet compared / header-only entries expose neither.
+        for status in [DiffStatus::Pending, DiffStatus::DirectoryPresent] {
+            assert!(!side_available(&status, Side::Left));
+            assert!(!side_available(&status, Side::Right));
+        }
     }
 
     #[test]

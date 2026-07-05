@@ -122,6 +122,28 @@ fn ignore_patterns() {
 }
 
 #[test]
+fn root_matching_ignore_pattern_is_still_scanned() {
+    // Comparing e.g. two `node_modules` folders directly: the ignore pattern
+    // must not filter out the scan root itself, only entries inside it.
+    let base = tempdir().unwrap();
+    let root = base.path().join("node_modules");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("a.txt"), b"hello").unwrap();
+    fs::create_dir(root.join("node_modules")).unwrap();
+    fs::write(root.join("node_modules").join("nested.txt"), b"ignored").unwrap();
+
+    let config = ScanConfig {
+        ignore_patterns: vec!["node_modules".to_string()],
+        follow_symlinks: false,
+    };
+    let scanner = Scanner::new(config);
+    let (map, _) = scanner.scan(&root);
+
+    assert!(map.keys().any(|p: &PathBuf| p.to_string_lossy().contains("a.txt")));
+    assert!(!map.keys().any(|p: &PathBuf| p.to_string_lossy().contains("nested.txt")));
+}
+
+#[test]
 fn hash_comparator_identical() {
     let dir = tempdir().unwrap();
     let a = dir.path().join("a.txt");
