@@ -5,10 +5,12 @@ use crate::{
         diff::{DiffEngine, DiffEntry, DiffFilter, DiffResult, DiffStatus},
         pipeline::{self, CompareMsg, ScanMsg},
     },
+    tools::{self, ExternalAction},
     ui::{
         layout::AppLayout,
+        overlay,
         panel::{DiffView, ViewRow, ViewRows},
-        statusbar::{StatusBar, StatusBarContext},
+        statusbar::{StatusBar, StatusBarContext, ToolKeyHints},
         theme::Theme,
         AppState,
     },
@@ -19,27 +21,8 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::Backend,
-    layout::{Alignment, Rect},
-    style::{Color, Style},
-    text::Line,
-    widgets::{Block, Borders, Clear, Paragraph},
-    Terminal,
-};
+use ratatui::{backend::Backend, widgets::Paragraph, Terminal};
 use std::{path::PathBuf, sync::{mpsc, Arc}};
-
-// ---------------------------------------------------------------------------
-// External tool actions
-// ---------------------------------------------------------------------------
-
-enum ExternalAction {
-    Diff { left: PathBuf, right: PathBuf },
-    ViewLeft(PathBuf),
-    EditLeft(PathBuf),
-    ViewRight(PathBuf),
-    EditRight(PathBuf),
-}
 
 // ---------------------------------------------------------------------------
 // Commands
@@ -180,21 +163,20 @@ impl App {
     }
 
     /// Checks whether the background scan has finished. When done, builds the
-    /// diff structure and kicks off phase-2 comparison. Returns `true` if the
-    /// scan just completed (view needs a full rebuild).
-    fn poll_scan(&mut self) -> bool {
+    /// diff structure, rebuilds the view and kicks off phase-2 comparison.
+    fn poll_scan(&mut self) {
         let msg = match &self.scan_rx {
             Some(rx) => match rx.try_recv() {
                 Ok(m) => m,
-                Err(mpsc::TryRecvError::Empty) => return false,
+                Err(mpsc::TryRecvError::Empty) => return,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.scan_rx = None;
                     self.state = AppState::Ready;
                     self.status_message = Some("Scan thread crashed unexpectedly".to_string());
-                    return false;
+                    return;
                 }
             },
-            None => return false,
+            None => return,
         };
 
         let ScanMsg::Done { left_map, right_map, errors } = msg;
@@ -204,7 +186,6 @@ impl App {
         self.diff_result = Some(result);
         self.rebuild_filtered();
         self.start_background_comparison();
-        true
     }
 
     /// Phase 2: hands the Pending entries to the background comparison pipeline.
@@ -272,16 +253,11 @@ impl App {
 
             match msg {
                 CompareMsg::Result { path, status } => {
-                    if let Some(result) = &mut self.diff_result {
-                        // entries are sorted by path (diff_structure calls all_paths.sort()),
-                        // so binary search is O(log n) instead of O(n) linear scan.
-                        if let Ok(idx) = result
-                            .entries
-                            .binary_search_by(|e| e.relative_path.cmp(&path))
-                        {
-                            result.update_entry_status(idx, status);
-                            changed = true;
-                        }
+                    if let Some(result) = &mut self.diff_result
+                        && let Some(idx) = result.find_by_path(&path)
+                    {
+                        result.update_entry_status(idx, status);
+                        changed = true;
                     }
                     if let AppState::Comparing { done, .. } = &mut self.state {
                         *done += 1;
@@ -366,38 +342,69 @@ impl App {
         B::Error: Send + Sync + 'static,
     {
         suspend_tui(terminal)?;
-        let result = self.run_external_command(&action);
+        let result = tools::run_action(&self.config.tools, &action);
         resume_tui(terminal)?;
         self.status_message = result?;
         Ok(())
     }
 
-    fn run_external_command(&self, action: &ExternalAction) -> Result<Option<String>> {
+    /// The single place encoding what Enter does for a given entry: Different →
+    /// diff tool, LeftOnly/RightOnly → viewer. Returns `None` when the entry has
+    /// no smart-open action or the required tool is not configured. Used both to
+    /// queue the action and to light up the status-bar hint, so the two cannot
+    /// drift apart.
+    fn open_action_for(&self, entry: &DiffEntry) -> Option<ExternalAction> {
         let tools = &self.config.tools;
-        let msg = match action {
-            ExternalAction::Diff { left, right } => {
-                if let Some(cmd) = &tools.diff_tool {
-                    launch_cmd(cmd, &[left, right])?
-                } else {
-                    None
-                }
-            }
-            ExternalAction::ViewLeft(p) | ExternalAction::ViewRight(p) => {
-                if let Some(cmd) = &tools.viewer {
-                    launch_cmd(cmd, &[p])?
-                } else {
-                    None
-                }
-            }
-            ExternalAction::EditLeft(p) | ExternalAction::EditRight(p) => {
-                if let Some(cmd) = &tools.editor {
-                    launch_cmd(cmd, &[p])?
-                } else {
-                    None
-                }
-            }
-        };
-        Ok(msg)
+        match &entry.status {
+            DiffStatus::Different if tools.diff_tool.is_some() => Some(ExternalAction::Diff {
+                left: self.left_root.join(&entry.relative_path),
+                right: self.right_root.join(&entry.relative_path),
+            }),
+            DiffStatus::LeftOnly if tools.viewer.is_some() => Some(ExternalAction::ViewLeft(
+                self.left_root.join(&entry.relative_path),
+            )),
+            DiffStatus::RightOnly if tools.viewer.is_some() => Some(ExternalAction::ViewRight(
+                self.right_root.join(&entry.relative_path),
+            )),
+            _ => None,
+        }
+    }
+
+    /// Availability of the tool key hints for the current selection, passed to
+    /// the status bar (which only displays them — the policy lives here).
+    fn tool_key_hints(&self) -> ToolKeyHints {
+        let status = self.selected_diff_entry().map(|e| &e.status);
+        let has_left = matches!(
+            status,
+            Some(
+                DiffStatus::LeftOnly
+                    | DiffStatus::Different
+                    | DiffStatus::Identical
+                    | DiffStatus::TypeConflict
+                    | DiffStatus::Error(_)
+            )
+        );
+        let has_right = matches!(
+            status,
+            Some(
+                DiffStatus::RightOnly
+                    | DiffStatus::Different
+                    | DiffStatus::Identical
+                    | DiffStatus::TypeConflict
+                    | DiffStatus::Error(_)
+            )
+        );
+        let enter_enabled = self
+            .selected_diff_entry()
+            .is_some_and(|e| self.open_action_for(e).is_some());
+        ToolKeyHints {
+            diff_tool_configured: self.config.tools.diff_tool.is_some(),
+            viewer_configured: self.config.tools.viewer.is_some(),
+            editor_configured: self.config.tools.editor.is_some(),
+            enter_enabled,
+            has_left,
+            has_right,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -499,16 +506,10 @@ impl App {
                 self.diff_view.list_state.select(Some(self.view_rows.last()));
             }
             Command::Open => {
-                if let Some(entry) = self.selected_diff_entry() {
-                    let left = self.left_root.join(&entry.relative_path);
-                    let right = self.right_root.join(&entry.relative_path);
-                    self.pending_action = match entry.status {
-                        DiffStatus::Different => Some(ExternalAction::Diff { left, right }),
-                        DiffStatus::LeftOnly => Some(ExternalAction::ViewLeft(left)),
-                        DiffStatus::RightOnly => Some(ExternalAction::ViewRight(right)),
-                        _ => None,
-                    };
-                }
+                let action = self
+                    .selected_diff_entry()
+                    .and_then(|entry| self.open_action_for(entry));
+                self.pending_action = action;
             }
             Command::ViewLeft => self.queue_side_action(Side::Left, ExternalAction::ViewLeft),
             Command::ViewRight => self.queue_side_action(Side::Right, ExternalAction::ViewRight),
@@ -591,8 +592,7 @@ impl App {
                 comparator_name: &self.comparator_name,
                 state: &self.state,
                 filter: &self.filter,
-                tools: &self.config.tools,
-                selected: self.selected_diff_entry(),
+                tool_keys: self.tool_key_hints(),
                 scan_errors: self.scan_errors,
                 status_message: self.status_message.as_deref(),
             },
@@ -600,8 +600,8 @@ impl App {
 
         // Overlay for transient states
         match &self.state {
-            AppState::Scanning => render_overlay(frame, " ⏳ Scanning folders… "),
-            AppState::Idle => render_overlay(frame, " Press F5 to start comparison "),
+            AppState::Scanning => overlay::render(frame, " ⏳ Scanning folders… "),
+            AppState::Idle => overlay::render(frame, " Press F5 to start comparison "),
             AppState::Comparing { .. } | AppState::Ready => {}
         }
     }
@@ -635,48 +635,6 @@ where
     execute!(terminal.backend_mut(), EnterAlternateScreen)?;
     terminal.clear()?;
     Ok(())
-}
-
-fn launch_cmd(tool: &crate::config::ToolCommand, args: &[&PathBuf]) -> Result<Option<String>> {
-    let (program, pre_args) = tool.program_and_args();
-    if program.is_empty() {
-        return Err(anyhow::anyhow!("empty command"));
-    }
-    let mut cmd = std::process::Command::new(program);
-    for arg in pre_args {
-        cmd.arg(arg);
-    }
-    for path in args {
-        cmd.arg(path);
-    }
-    let status = cmd.status()?;
-    if status.success() {
-        Ok(None)
-    } else {
-        Ok(Some(format!("Tool exited with {status}")))
-    }
-}
-
-fn render_overlay(frame: &mut ratatui::Frame, message: &str) {
-    let area = frame.area();
-    if area.width == 0 || area.height == 0 {
-        return;
-    }
-    let msg_len = message.len() as u16;
-    let width = (msg_len.min(area.width.saturating_sub(4)) + 4).min(area.width);
-    let height = 3u16.min(area.height);
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let y = area.y + (area.height.saturating_sub(height)) / 2;
-    let popup_area = Rect::new(x, y, width, height);
-
-    frame.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
-    let paragraph = Paragraph::new(Line::from(message.to_string()))
-        .block(block)
-        .alignment(Alignment::Center);
-    frame.render_widget(paragraph, popup_area);
 }
 
 #[cfg(test)]

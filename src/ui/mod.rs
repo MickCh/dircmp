@@ -1,4 +1,5 @@
 pub mod layout;
+pub mod overlay;
 pub mod panel;
 pub mod statusbar;
 pub mod theme;

@@ -1,6 +1,5 @@
 use crate::{
-    config::ToolsConfig,
-    engine::diff::{DiffEntry, DiffFilter, DiffResult, DiffStatus},
+    engine::diff::{DiffFilter, DiffResult},
     ui::{theme::Theme, AppState},
 };
 use ratatui::{
@@ -11,14 +10,29 @@ use ratatui::{
     Frame,
 };
 
+/// Availability of the external-tool key hints, precomputed by the app layer.
+/// The status bar only displays these — the policy of what Enter/[/]/{/} do
+/// for a given selection lives in `app`, next to the command handling.
+#[derive(Clone, Copy, Default)]
+pub struct ToolKeyHints {
+    /// Corresponding tool is configured (hint row is shown at all).
+    pub diff_tool_configured: bool,
+    pub viewer_configured: bool,
+    pub editor_configured: bool,
+    /// Enter would launch a tool on the current selection.
+    pub enter_enabled: bool,
+    /// The selected entry has a left / right file to view or edit.
+    pub has_left: bool,
+    pub has_right: bool,
+}
+
 /// Everything the status bar needs to render one frame, borrowed from `App`.
 pub struct StatusBarContext<'a> {
     pub diff: Option<&'a DiffResult>,
     pub comparator_name: &'a str,
     pub state: &'a AppState,
     pub filter: &'a DiffFilter,
-    pub tools: &'a ToolsConfig,
-    pub selected: Option<&'a DiffEntry>,
+    pub tool_keys: ToolKeyHints,
     pub scan_errors: usize,
     pub status_message: Option<&'a str>,
 }
@@ -61,32 +75,14 @@ impl StatusBar {
             }
         };
 
-        // Compute per-action availability based on selected entry.
-        let has_left = matches!(
-            ctx.selected.map(|e| &e.status),
-            Some(
-                DiffStatus::LeftOnly
-                    | DiffStatus::Different
-                    | DiffStatus::Identical
-                    | DiffStatus::TypeConflict
-                    | DiffStatus::Error(_)
-            )
-        );
-        let has_right = matches!(
-            ctx.selected.map(|e| &e.status),
-            Some(
-                DiffStatus::RightOnly
-                    | DiffStatus::Different
-                    | DiffStatus::Identical
-                    | DiffStatus::TypeConflict
-                    | DiffStatus::Error(_)
-            )
-        );
-        let can_enter = match ctx.selected.map(|e| &e.status) {
-            Some(DiffStatus::Different) => ctx.tools.diff_tool.is_some(),
-            Some(DiffStatus::LeftOnly | DiffStatus::RightOnly) => ctx.tools.viewer.is_some(),
-            _ => false,
-        };
+        let ToolKeyHints {
+            diff_tool_configured,
+            viewer_configured,
+            editor_configured,
+            enter_enabled,
+            has_left,
+            has_right,
+        } = ctx.tool_keys;
         fn key(active: bool) -> Style {
             if active { Theme::statusbar_key() } else { Theme::statusbar_inactive_key() }
         }
@@ -114,19 +110,19 @@ impl StatusBar {
             Span::styled(":Jump", Theme::statusbar()),
         ];
 
-        if ctx.tools.diff_tool.is_some() {
-            key_spans.push(Span::styled("  Enter", key(can_enter)));
-            key_spans.push(Span::styled(":Diff", label(can_enter)));
+        if diff_tool_configured {
+            key_spans.push(Span::styled("  Enter", key(enter_enabled)));
+            key_spans.push(Span::styled(":Diff", label(enter_enabled)));
         }
 
-        if ctx.tools.viewer.is_some() {
+        if viewer_configured {
             key_spans.push(Span::styled("  [", key(has_left)));
             key_spans.push(Span::styled("/", Theme::statusbar_inactive_key()));
             key_spans.push(Span::styled("]", key(has_right)));
             key_spans.push(Span::styled(":View", label(has_left || has_right)));
         }
 
-        if ctx.tools.editor.is_some() {
+        if editor_configured {
             key_spans.push(Span::styled("  {", key(has_left)));
             key_spans.push(Span::styled("/", Theme::statusbar_inactive_key()));
             key_spans.push(Span::styled("}", key(has_right)));

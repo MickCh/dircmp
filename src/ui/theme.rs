@@ -55,6 +55,10 @@ impl Theme {
         Style::default().bg(SURFACE0).fg(TEXT)
     }
 
+    pub fn overlay() -> Style {
+        Style::default().bg(SURFACE0).fg(TEXT)
+    }
+
     pub fn statusbar_key() -> Style {
         Style::default()
             .bg(SURFACE0)
