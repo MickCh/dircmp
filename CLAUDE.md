@@ -15,7 +15,9 @@ Three clearly separated layers with a one-directional dependency graph: `app →
 src/
 ├── main.rs              – CLI arg parsing, disk-type detection, terminal init (ratatui::init/restore)
 ├── lib.rs               – declares all modules (the only place with mod declarations)
-├── app.rs               – App struct, main event loop, Command enum (KeyCode → Command → apply), external tool launch
+├── app.rs               – App struct, main event loop, Command enum (KeyCode → Command → apply), Enter policy (open_action_for)
+├── platform.rs          – disk-type detection (/sys/block rotational on Linux)
+├── tools.rs             – external tool launching (ExternalAction, run_action); depends only on config
 ├── config/mod.rs        – Config structs + TOML loading
 ├── engine/
 │   ├── scanner.rs       – Recursive folder scan → EntryMap (HashMap<PathBuf, Entry>)
@@ -30,14 +32,16 @@ src/
 └── ui/
     ├── mod.rs           – AppState (Idle|Scanning|Comparing|Ready)
     ├── layout.rs        – AppLayout: header (1 line) + main + statusbar (2 lines)
+    ├── overlay.rs       – centered popup message box (scanning / idle hint)
     ├── panel.rs         – DiffView (unified list), ViewRow, ViewRows (row list + cursor navigation methods)
-    ├── statusbar.rs     – StatusBar + StatusBarContext: stats + keybinding hints (dynamic, tool-aware)
+    ├── statusbar.rs     – StatusBar + StatusBarContext + ToolKeyHints: stats + keybinding hints
     └── theme.rs         – Theme: all Style constants
 ```
 
 Key conventions:
 - **Comparison logic lives in `engine`, never in `app`.** `app` only polls the `mpsc` receivers returned by `engine::pipeline` and updates the view. The `CompareResult → DiffStatus` mapping exists in exactly one place: `engine::diff::compare_entry()`.
-- **UI modules never import from `app`.** Types shared with widgets live at or below the widget's layer (`DiffFilter` in `engine/diff.rs`, `AppState` in `ui/mod.rs`).
+- **UI modules never import from `app`.** Types shared with widgets live at or below the widget's layer (`DiffFilter` in `engine/diff.rs`, `AppState` in `ui/mod.rs`). The status bar receives precomputed `ToolKeyHints` booleans, not `ToolsConfig` or the selected entry — the Enter/tool-key policy lives in `App::open_action_for` / `App::tool_key_hints`, next to the command handling.
+- **`DiffResult.entries` is sorted by relative path** (established in `diff_structure`); lookups go through `DiffResult::find_by_path` (binary search), and the cached per-status counters are maintained solely via `bump_count` / `update_entry_status`.
 - **Comparator errors go through `anyhow::Result`** (with path context); `CompareResult` is only `Identical | Different`. `compare_entry` folds `Err` into `DiffStatus::Error` using `format!("{e:#}")` to keep the whole context chain.
 - **Key handling is a pure function** `command_for_key(KeyCode) -> Option<Command>` followed by `App::apply(Command)` — the key map is unit-tested inline in `app.rs`.
 
@@ -60,7 +64,8 @@ Key conventions:
 | `AppState` | `ui/mod.rs` | `Idle\|Scanning\|Comparing{done,total}\|Ready` |
 | `StatusBarContext` | `ui/statusbar.rs` | Parameter object with everything the status bar renders per frame |
 | `Command` | `app.rs` | User command decoded from a key press (`Quit\|Rescan\|Toggle*\|Cursor*\|Open\|View*\|Edit*`) |
-| `ExternalAction` | `app.rs` | `Diff{left,right}\|ViewLeft\|EditLeft\|ViewRight\|EditRight` – queued before terminal handoff |
+| `ExternalAction` | `tools.rs` | `Diff{left,right}\|ViewLeft\|EditLeft\|ViewRight\|EditRight` – queued before terminal handoff, executed by `tools::run_action` |
+| `ToolKeyHints` | `ui/statusbar.rs` | Precomputed booleans for tool key hints (configured tools, enter_enabled, has_left/right) |
 
 ## Extending: Adding a New Comparator
 
@@ -122,7 +127,7 @@ Before the external command runs, the TUI releases raw mode and the alternate sc
 - **Non-blocking scan:** Phase 1 scan runs in a background thread (via `scan_rx` channel), so the UI remains responsive with a ⏳ Scanning… overlay during the scan.
 - **Unified list view:** no left/right panel split — one list, one cursor
 - **Folder header bars:** entries grouped by parent directory; each group starts with a full-width colored bar showing the directory path (`./`, `src/`, `src/engine/` etc.)
-- **Directory entries** (`DirectoryPresent`) are skipped — represented only as header bars
+- **Directory entries** present on both sides (`DirectoryPresent`) are skipped — represented only as header bars. Directories that exist on one side only, or type-conflict with a file, **are** shown as entry rows with a trailing `/` in the name (otherwise they would be invisible)
 - **Cursor navigation:** `↑↓ PgUp/PgDn Home/End`; cursor skips folder header rows (lands only on file entries)
 - **Status-based jump:** `n`/`N` jump to the next/previous entry whose status matches the currently selected entry (e.g. standing on a `Different` entry, `n` finds the next `Different`); defaults to `Different` when nothing is selected
 - **Filters:** four independent toggles (L/R/D/I keys) for left-only, right-only, different, identical entries
@@ -188,5 +193,5 @@ Column widths computed dynamically: `left = right = (area.width - 5) / 2`
 cargo test
 ```
 
-Integration tests: `tests/engine_tests.rs`
-Unit tests: inline in `src/engine/comparator/text.rs` (normalization) and `src/app.rs` (key → Command map)
+Integration tests: `tests/engine_tests.rs`, `tests/ui_tests.rs` (ViewRows building/navigation)
+Unit tests: inline in `src/engine/comparator/text.rs` (normalization), `src/app.rs` (key → Command map) and `src/config/mod.rs` (default template ↔ `Config::default()` lock)
