@@ -12,7 +12,7 @@ pub struct Config {
     pub tools: ToolsConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ComparisonConfig {
     pub strategy: ComparisonStrategy,
     pub text: TextComparisonConfig,
@@ -37,7 +37,7 @@ pub enum ComparisonStrategy {
     Text,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TextComparisonConfig {
     pub ignore_whitespace: bool,
     pub ignore_case: bool,
@@ -104,7 +104,7 @@ pub struct ToolsConfig {
     pub editor: Option<ToolCommand>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ScanConfig {
     pub ignore_patterns: Vec<String>,
     pub follow_symlinks: bool,
@@ -173,5 +173,23 @@ impl Config {
     /// Returns the default configuration file contents (TOML with comments).
     fn default_template() -> &'static str {
         include_str!("../../config.toml")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Config::default()` and the bundled config.toml template both define
+    /// the defaults; this locks the duplicated sections together so they
+    /// cannot drift apart. `[tools]` is intentionally exempt: the template
+    /// ships example tools, while the code default configures none.
+    #[test]
+    fn default_template_matches_config_default() {
+        let parsed: Config = toml::from_str(Config::default_template())
+            .expect("bundled config.toml template must parse");
+        let default = Config::default();
+        assert_eq!(parsed.comparison, default.comparison);
+        assert_eq!(parsed.scan, default.scan);
     }
 }
