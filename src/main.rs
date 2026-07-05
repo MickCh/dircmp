@@ -1,18 +1,6 @@
-mod app;
-mod config;
-mod engine;
-mod platform;
-mod ui;
-
 use anyhow::{bail, Context, Result};
-use app::App;
-use config::Config;
-use crossterm::{
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{backend::CrosstermBackend, Terminal};
-use std::{io, path::PathBuf};
+use dircmp::{app::App, config::Config, platform};
+use std::path::PathBuf;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -32,7 +20,7 @@ fn main() -> Result<()> {
         bail!("Right path is not a directory: {}", right_path.display());
     }
 
-    let config = match config_path {
+    let mut config = match config_path {
         Some(path) => {
             if !path.exists() {
                 bail!("Config file not found: {}", path.display());
@@ -43,29 +31,17 @@ fn main() -> Result<()> {
             .context("Failed to load configuration")?,
     };
 
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    // Auto-detect disk type on Linux; overrides the configured value when detection succeeds.
+    if let Some(rotational) = platform::is_rotational(&left_path) {
+        config.comparison.parallel = !rotational;
+    }
 
-    let result = run_app(&mut terminal, left_path, right_path, config);
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
+    // ratatui::init() enables raw mode + alternate screen and installs a panic
+    // hook that restores the terminal, so a crash never leaves it in raw mode.
+    let mut terminal = ratatui::init();
+    let result = App::new(left_path, right_path, config).run(&mut terminal);
+    ratatui::restore();
     result
-}
-
-fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    left_path: PathBuf,
-    right_path: PathBuf,
-    config: Config,
-) -> Result<()> {
-    let mut app = App::new(left_path, right_path, config);
-    app.run(terminal)
 }
 
 fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {

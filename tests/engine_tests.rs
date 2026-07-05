@@ -6,11 +6,10 @@ use dircmp::engine::{
         text::TextComparator,
         CompareResult, FileComparator,
     },
-    diff::{DiffEngine, DiffEntry, DiffStatus},
+    diff::{DiffEngine, DiffEntry, DiffFilter, DiffStatus},
     scanner::Scanner,
 };
 use dircmp::config::ScanConfig;
-use dircmp::app::DiffFilter;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
@@ -356,7 +355,7 @@ fn scanner_recurses_into_subdirectories() {
     assert!(map.contains_key(Path::new("root.txt")));
     assert!(map.contains_key(Path::new("sub/nested.txt")));
     // The sub-directory itself should be present as a directory entry.
-    assert!(map.get(Path::new("sub")).map_or(false, |e| e.is_dir));
+    assert!(map.get(Path::new("sub")).is_some_and(|e| e.is_dir));
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 use super::{CompareResult, FileComparator};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -36,14 +36,8 @@ impl TextComparator {
 
 impl FileComparator for TextComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
-        let file_a = match File::open(a) {
-            Ok(f) => f,
-            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e))),
-        };
-        let file_b = match File::open(b) {
-            Ok(f) => f,
-            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e))),
-        };
+        let file_a = File::open(a).with_context(|| format!("Read error {}", a.display()))?;
+        let file_b = File::open(b).with_context(|| format!("Read error {}", b.display()))?;
 
         let mut lines_a = BufReader::new(file_a).lines();
         let mut lines_b = BufReader::new(file_b).lines();
@@ -52,10 +46,10 @@ impl FileComparator for TextComparator {
             match (lines_a.next(), lines_b.next()) {
                 (None, None) => return Ok(CompareResult::Identical),
                 (Some(Err(e)), _) => {
-                    return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e)))
+                    return Err(e).with_context(|| format!("Read error {}", a.display()))
                 }
                 (_, Some(Err(e))) => {
-                    return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e)))
+                    return Err(e).with_context(|| format!("Read error {}", b.display()))
                 }
                 (Some(Ok(la)), Some(Ok(lb))) => {
                     if self.normalize_line(&la) != self.normalize_line(&lb) {

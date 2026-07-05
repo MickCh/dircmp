@@ -1,19 +1,16 @@
 use crate::{
     config::Config,
     engine::{
-        comparator::{create_comparator, CompareResult, FileComparator},
-        diff::{DiffEngine, DiffEntry, DiffStatus},
-        scanner::{EntryMap, Scanner},
+        comparator::create_comparator,
+        diff::{DiffEngine, DiffEntry, DiffFilter, DiffResult, DiffStatus},
+        pipeline::{self, CompareMsg, ScanMsg},
     },
-    platform,
     ui::{
         layout::AppLayout,
-        panel::{
-            build_view_rows, first_entry, last_entry, next_entry, next_entry_matching,
-            nth_next_entry, nth_prev_entry, prev_entry, prev_entry_matching, DiffView, ViewRow,
-        },
-        statusbar::StatusBar,
+        panel::{DiffView, ViewRow, ViewRows},
+        statusbar::{StatusBar, StatusBarContext},
         theme::Theme,
+        AppState,
     },
 };
 use anyhow::Result;
@@ -30,20 +27,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Terminal,
 };
-use std::{path::{Path, PathBuf}, sync::{mpsc, Arc}};
-
-// ---------------------------------------------------------------------------
-// Background comparison channel
-// ---------------------------------------------------------------------------
-
-enum CompareMsg {
-    Result { path: PathBuf, status: DiffStatus },
-    Done,
-}
-
-enum ScanMsg {
-    Done { left_map: EntryMap, right_map: EntryMap, errors: usize },
-}
+use std::{path::PathBuf, sync::{mpsc, Arc}};
 
 // ---------------------------------------------------------------------------
 // External tool actions
@@ -58,56 +42,58 @@ enum ExternalAction {
 }
 
 // ---------------------------------------------------------------------------
-// App state
+// Commands
 // ---------------------------------------------------------------------------
 
-pub enum AppState {
-    Idle,
-    Scanning,
-    /// Files are being compared in a background thread.
-    Comparing { done: usize, total: usize },
-    Ready,
+/// A user command decoded from a key press. Keeping the key map a pure
+/// `KeyCode -> Command` function makes it unit-testable without a terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Command {
+    Quit,
+    Rescan,
+    ToggleLeftOnly,
+    ToggleRightOnly,
+    ToggleDifferent,
+    ToggleIdentical,
+    JumpNextMatching,
+    JumpPrevMatching,
+    CursorDown,
+    CursorUp,
+    PageDown,
+    PageUp,
+    CursorHome,
+    CursorEnd,
+    /// Smart open: Different → diff tool, LeftOnly/RightOnly → viewer.
+    Open,
+    ViewLeft,
+    ViewRight,
+    EditLeft,
+    EditRight,
 }
 
-// ---------------------------------------------------------------------------
-// Diff filter
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy)]
-pub struct DiffFilter {
-    pub show_left_only: bool,
-    pub show_right_only: bool,
-    pub show_different: bool,
-    pub show_identical: bool,
-}
-
-impl Default for DiffFilter {
-    fn default() -> Self {
-        Self {
-            show_left_only: true,
-            show_right_only: true,
-            show_different: true,
-            show_identical: true,
-        }
-    }
-}
-
-impl DiffFilter {
-    pub fn matches(&self, entry: &DiffEntry) -> bool {
-        match &entry.status {
-            DiffStatus::LeftOnly => self.show_left_only,
-            DiffStatus::RightOnly => self.show_right_only,
-            DiffStatus::Different => self.show_different,
-            DiffStatus::Identical => self.show_identical,
-            // Pending and DirectoryPresent are excluded before reaching this filter
-            // (build_view_rows skips them). TypeConflict and Error have no toggle —
-            // always visible so the user can see what went wrong.
-            DiffStatus::Pending
-            | DiffStatus::DirectoryPresent
-            | DiffStatus::TypeConflict
-            | DiffStatus::Error(_) => true,
-        }
-    }
+fn command_for_key(code: KeyCode) -> Option<Command> {
+    Some(match code {
+        KeyCode::Char('q') | KeyCode::Char('Q') => Command::Quit,
+        KeyCode::F(5) => Command::Rescan,
+        KeyCode::Char('l') | KeyCode::Char('L') => Command::ToggleLeftOnly,
+        KeyCode::Char('r') | KeyCode::Char('R') => Command::ToggleRightOnly,
+        KeyCode::Char('d') | KeyCode::Char('D') => Command::ToggleDifferent,
+        KeyCode::Char('i') | KeyCode::Char('I') => Command::ToggleIdentical,
+        KeyCode::Char('n') => Command::JumpNextMatching,
+        KeyCode::Char('N') => Command::JumpPrevMatching,
+        KeyCode::Down => Command::CursorDown,
+        KeyCode::Up => Command::CursorUp,
+        KeyCode::PageDown => Command::PageDown,
+        KeyCode::PageUp => Command::PageUp,
+        KeyCode::Home => Command::CursorHome,
+        KeyCode::End => Command::CursorEnd,
+        KeyCode::Enter => Command::Open,
+        KeyCode::Char('[') => Command::ViewLeft,
+        KeyCode::Char(']') => Command::ViewRight,
+        KeyCode::Char('{') => Command::EditLeft,
+        KeyCode::Char('}') => Command::EditRight,
+        _ => return None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -119,8 +105,8 @@ pub struct App {
     left_root: PathBuf,
     right_root: PathBuf,
     diff_view: DiffView,
-    diff_result: Option<crate::engine::diff::DiffResult>,
-    view_rows: Vec<ViewRow>,
+    diff_result: Option<DiffResult>,
+    view_rows: ViewRows,
     filter: DiffFilter,
     comparator_name: String,
     should_quit: bool,
@@ -144,12 +130,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(left_path: PathBuf, right_path: PathBuf, mut config: Config) -> Self {
-        // Auto-detect disk type on Linux; override config if successful.
-        if let Some(rotational) = platform::is_rotational(&left_path) {
-            config.comparison.parallel = !rotational;
-        }
-
+    pub fn new(left_path: PathBuf, right_path: PathBuf, config: Config) -> Self {
         let comparator = create_comparator(&config.comparison);
         let comparator_name = comparator.name().to_string();
 
@@ -167,7 +148,7 @@ impl App {
             right_root: right_path,
             diff_view: DiffView::new(),
             diff_result: None,
-            view_rows: Vec::new(),
+            view_rows: ViewRows::default(),
             filter: DiffFilter::default(),
             comparator_name,
             should_quit: false,
@@ -187,32 +168,15 @@ impl App {
     // Diff phases
     // -----------------------------------------------------------------------
 
-    /// Phase 1: spawns a background thread that scans both folder trees in parallel.
-    /// The UI remains responsive while scanning; results arrive via `scan_rx`.
+    /// Phase 1: kicks off the background scan of both folder trees.
     fn start_background_scan(&mut self) {
-        self.scan_rx = None;
         self.compare_rx = None;
         self.status_message = None;
-
-        let (tx, rx) = mpsc::channel();
-        let left_root = self.left_root.clone();
-        let right_root = self.right_root.clone();
-        let scan_config = self.config.scan.clone();
-
-        std::thread::spawn(move || {
-            let scanner = Scanner::new(scan_config);
-            let ((left_map, left_errors), (right_map, right_errors)) = rayon::join(
-                || scanner.scan(&left_root),
-                || scanner.scan(&right_root),
-            );
-            let _ = tx.send(ScanMsg::Done {
-                left_map,
-                right_map,
-                errors: left_errors + right_errors,
-            });
-        });
-
-        self.scan_rx = Some(rx);
+        self.scan_rx = Some(pipeline::spawn_scan(
+            self.config.scan.clone(),
+            self.left_root.clone(),
+            self.right_root.clone(),
+        ));
     }
 
     /// Checks whether the background scan has finished. When done, builds the
@@ -243,61 +207,28 @@ impl App {
         true
     }
 
-    /// Phase 2: spawn a background thread that compares Pending entries one
-    /// by one and sends results through an mpsc channel.
+    /// Phase 2: hands the Pending entries to the background comparison pipeline.
     fn start_background_comparison(&mut self) {
-        let left_root = self.left_root.clone();
-        let right_root = self.right_root.clone();
-
-        let to_compare: Vec<(PathBuf, PathBuf, PathBuf)> = self
+        let result = self
             .diff_result
             .as_ref()
-            .unwrap()
-            .entries
-            .iter()
-            .filter(|e| e.status == DiffStatus::Pending)
-            .map(|e| {
-                let rel = e.relative_path.clone();
-                let abs_left = left_root.join(&rel);
-                let abs_right = right_root.join(&rel);
-                (rel, abs_left, abs_right)
-            })
-            .collect();
-
-        if to_compare.is_empty() {
-            self.state = AppState::Ready;
-            return;
-        }
-
-        let total = to_compare.len();
-        self.state = AppState::Comparing { done: 0, total };
-        let (tx, rx) = mpsc::channel();
+            .expect("diff_result set by poll_scan before phase 2");
         let comparator = create_comparator(&self.config.comparison);
-        let parallel = self.config.comparison.parallel;
-        let pool = self.rayon_pool.clone();
 
-        std::thread::spawn(move || {
-            if parallel {
-                use rayon::prelude::*;
-                let par_tx = tx.clone();
-                pool.install(|| {
-                    to_compare.par_iter().for_each_with(par_tx, |tx, (rel, left, right)| {
-                        let status = compare_one(comparator.as_ref(), left, right);
-                        let _ = tx.send(CompareMsg::Result { path: rel.clone(), status });
-                    });
-                });
-            } else {
-                for (rel, left, right) in &to_compare {
-                    let status = compare_one(comparator.as_ref(), left, right);
-                    if tx.send(CompareMsg::Result { path: rel.clone(), status }).is_err() {
-                        return;
-                    }
-                }
+        match pipeline::spawn_comparison(
+            result,
+            &self.left_root,
+            &self.right_root,
+            comparator,
+            self.rayon_pool.clone(),
+            self.config.comparison.parallel,
+        ) {
+            Some((rx, total)) => {
+                self.state = AppState::Comparing { done: 0, total };
+                self.compare_rx = Some(rx);
             }
-            let _ = tx.send(CompareMsg::Done);
-        });
-
-        self.compare_rx = Some(rx);
+            None => self.state = AppState::Ready,
+        }
     }
 
     /// Full re-scan triggered by F5.
@@ -389,15 +320,12 @@ impl App {
     fn rebuild_filtered(&mut self) {
         let old_idx = self.diff_view.selected_index();
 
-        // Build view_rows directly from diff_result without cloning entries.
-        // ViewRow::Entry(i) stores an index into diff_result.entries.
-        let new_rows = if let Some(result) = &self.diff_result {
+        self.view_rows = if let Some(result) = &self.diff_result {
             let filter = &self.filter;
-            build_view_rows(&result.entries, |e| filter.matches(e))
+            ViewRows::build(&result.entries, |e| filter.matches(e))
         } else {
-            Vec::new()
+            ViewRows::default()
         };
-        self.view_rows = new_rows;
 
         // Preserve cursor position, clamped to valid range.
         // Guard: if all entries are filtered out, deselect and bail — idx=0 on an
@@ -408,7 +336,7 @@ impl App {
         } else {
             old_idx
                 .map(|i| i.min(self.view_rows.len().saturating_sub(1)))
-                .unwrap_or_else(|| first_entry(&self.view_rows))
+                .unwrap_or_else(|| self.view_rows.first())
         };
         self.diff_view.list_state.select(Some(idx));
     }
@@ -501,7 +429,10 @@ impl App {
                 && let Event::Key(key) = event::read()?
                 && key.kind == KeyEventKind::Press
             {
-                self.handle_key(key.code);
+                self.status_message = None;
+                if let Some(cmd) = command_for_key(key.code) {
+                    self.apply(cmd);
+                }
             }
 
             if let Some(action) = self.pending_action.take() {
@@ -516,61 +447,58 @@ impl App {
     }
 
     // -----------------------------------------------------------------------
-    // Input handling
+    // Command handling
     // -----------------------------------------------------------------------
 
-    fn handle_key(&mut self, code: KeyCode) {
-        self.status_message = None;
-        match code {
-            KeyCode::Char('q') | KeyCode::Char('Q') => {
-                self.should_quit = true;
-            }
-            KeyCode::F(5) => {
-                self.run_diff();
-            }
-            KeyCode::Char('l') | KeyCode::Char('L') => {
+    fn apply(&mut self, cmd: Command) {
+        match cmd {
+            Command::Quit => self.should_quit = true,
+            Command::Rescan => self.run_diff(),
+            Command::ToggleLeftOnly => {
                 self.filter.show_left_only = !self.filter.show_left_only;
                 self.rebuild_filtered();
             }
-            KeyCode::Char('r') | KeyCode::Char('R') => {
+            Command::ToggleRightOnly => {
                 self.filter.show_right_only = !self.filter.show_right_only;
                 self.rebuild_filtered();
             }
-            KeyCode::Char('d') | KeyCode::Char('D') => {
+            Command::ToggleDifferent => {
                 self.filter.show_different = !self.filter.show_different;
                 self.rebuild_filtered();
             }
-            KeyCode::Char('i') | KeyCode::Char('I') => {
+            Command::ToggleIdentical => {
                 self.filter.show_identical = !self.filter.show_identical;
                 self.rebuild_filtered();
             }
-            KeyCode::Char('n') => self.jump_to_matching(true),
-            KeyCode::Char('N') => self.jump_to_matching(false),
-            KeyCode::Down => {
+            Command::JumpNextMatching => self.jump_to_matching(true),
+            Command::JumpPrevMatching => self.jump_to_matching(false),
+            Command::CursorDown => {
                 let cur = self.diff_view.selected_index().unwrap_or(0);
-                let next = next_entry(&self.view_rows, cur);
-                self.diff_view.list_state.select(Some(next));
+                self.diff_view.list_state.select(Some(self.view_rows.next(cur)));
             }
-            KeyCode::Up => {
+            Command::CursorUp => {
                 let cur = self.diff_view.selected_index().unwrap_or(0);
-                let prev = prev_entry(&self.view_rows, cur);
-                self.diff_view.list_state.select(Some(prev));
+                self.diff_view.list_state.select(Some(self.view_rows.prev(cur)));
             }
-            KeyCode::PageDown => {
-                let idx = self.diff_view.selected_index().unwrap_or(0);
-                self.diff_view.list_state.select(Some(nth_next_entry(&self.view_rows, idx, self.page_height)));
+            Command::PageDown => {
+                let cur = self.diff_view.selected_index().unwrap_or(0);
+                self.diff_view
+                    .list_state
+                    .select(Some(self.view_rows.nth_next(cur, self.page_height)));
             }
-            KeyCode::PageUp => {
-                let idx = self.diff_view.selected_index().unwrap_or(0);
-                self.diff_view.list_state.select(Some(nth_prev_entry(&self.view_rows, idx, self.page_height)));
+            Command::PageUp => {
+                let cur = self.diff_view.selected_index().unwrap_or(0);
+                self.diff_view
+                    .list_state
+                    .select(Some(self.view_rows.nth_prev(cur, self.page_height)));
             }
-            KeyCode::Home => {
-                self.diff_view.list_state.select(Some(first_entry(&self.view_rows)));
+            Command::CursorHome => {
+                self.diff_view.list_state.select(Some(self.view_rows.first()));
             }
-            KeyCode::End => {
-                self.diff_view.list_state.select(Some(last_entry(&self.view_rows)));
+            Command::CursorEnd => {
+                self.diff_view.list_state.select(Some(self.view_rows.last()));
             }
-            KeyCode::Enter => {
+            Command::Open => {
                 if let Some(entry) = self.selected_diff_entry() {
                     let left = self.left_root.join(&entry.relative_path);
                     let right = self.right_root.join(&entry.relative_path);
@@ -582,32 +510,22 @@ impl App {
                     };
                 }
             }
-            KeyCode::Char('[') => {
-                if let Some(entry) = self.selected_diff_entry() {
-                    let path = self.left_root.join(&entry.relative_path);
-                    self.pending_action = Some(ExternalAction::ViewLeft(path));
-                }
-            }
-            KeyCode::Char(']') => {
-                if let Some(entry) = self.selected_diff_entry() {
-                    let path = self.right_root.join(&entry.relative_path);
-                    self.pending_action = Some(ExternalAction::ViewRight(path));
-                }
-            }
-            KeyCode::Char('{') => {
-                if let Some(entry) = self.selected_diff_entry() {
-                    let path = self.left_root.join(&entry.relative_path);
-                    self.pending_action = Some(ExternalAction::EditLeft(path));
-                }
-            }
-            KeyCode::Char('}') => {
-                if let Some(entry) = self.selected_diff_entry() {
-                    let path = self.right_root.join(&entry.relative_path);
-                    self.pending_action = Some(ExternalAction::EditRight(path));
-                }
-            }
-            _ => {}
+            Command::ViewLeft => self.queue_side_action(Side::Left, ExternalAction::ViewLeft),
+            Command::ViewRight => self.queue_side_action(Side::Right, ExternalAction::ViewRight),
+            Command::EditLeft => self.queue_side_action(Side::Left, ExternalAction::EditLeft),
+            Command::EditRight => self.queue_side_action(Side::Right, ExternalAction::EditRight),
         }
+    }
+
+    /// Queues an external action on the selected entry's left or right path.
+    fn queue_side_action(&mut self, side: Side, make: fn(PathBuf) -> ExternalAction) {
+        let Some(entry) = self.selected_diff_entry() else { return };
+        let root = match side {
+            Side::Left => &self.left_root,
+            Side::Right => &self.right_root,
+        };
+        let path = root.join(&entry.relative_path);
+        self.pending_action = Some(make(path));
     }
 
     /// Jumps to the next (`forward = true`) or previous entry whose status matches
@@ -624,11 +542,11 @@ impl App {
             .map(|r| r.entries.as_slice())
             .unwrap_or_default();
         let idx = if forward {
-            next_entry_matching(&self.view_rows, entries, cur, |e| {
+            self.view_rows.next_matching(entries, cur, |e| {
                 std::mem::discriminant(&e.status) == target
             })
         } else {
-            prev_entry_matching(&self.view_rows, entries, cur, |e| {
+            self.view_rows.prev_matching(entries, cur, |e| {
                 std::mem::discriminant(&e.status) == target
             })
         };
@@ -668,14 +586,16 @@ impl App {
         StatusBar::render(
             frame,
             layout.statusbar,
-            self.diff_result.as_ref(),
-            &self.comparator_name,
-            &self.state,
-            &self.filter,
-            &self.config.tools,
-            self.selected_diff_entry(),
-            self.scan_errors,
-            self.status_message.as_deref(),
+            &StatusBarContext {
+                diff: self.diff_result.as_ref(),
+                comparator_name: &self.comparator_name,
+                state: &self.state,
+                filter: &self.filter,
+                tools: &self.config.tools,
+                selected: self.selected_diff_entry(),
+                scan_errors: self.scan_errors,
+                status_message: self.status_message.as_deref(),
+            },
         );
 
         // Overlay for transient states
@@ -684,8 +604,14 @@ impl App {
             AppState::Idle => render_overlay(frame, " Press F5 to start comparison "),
             AppState::Comparing { .. } | AppState::Ready => {}
         }
-
     }
+}
+
+/// Which side of the comparison a path-based action targets.
+#[derive(Clone, Copy)]
+enum Side {
+    Left,
+    Right,
 }
 
 // ---------------------------------------------------------------------------
@@ -731,20 +657,14 @@ fn launch_cmd(tool: &crate::config::ToolCommand, args: &[&PathBuf]) -> Result<Op
     }
 }
 
-fn compare_one(comparator: &dyn FileComparator, left: &Path, right: &Path) -> DiffStatus {
-    match comparator.compare(left, right) {
-        Ok(CompareResult::Identical) => DiffStatus::Identical,
-        Ok(CompareResult::Different) => DiffStatus::Different,
-        Ok(CompareResult::Error(e)) => DiffStatus::Error(e),
-        Err(e) => DiffStatus::Error(e.to_string()),
-    }
-}
-
 fn render_overlay(frame: &mut ratatui::Frame, message: &str) {
     let area = frame.area();
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     let msg_len = message.len() as u16;
-    let width = msg_len.min(area.width.saturating_sub(4)) + 4;
-    let height = 3u16;
+    let width = (msg_len.min(area.width.saturating_sub(4)) + 4).min(area.width);
+    let height = 3u16.min(area.height);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;
     let popup_area = Rect::new(x, y, width, height);
@@ -757,4 +677,52 @@ fn render_overlay(frame: &mut ratatui::Frame, message: &str) {
         .block(block)
         .alignment(Alignment::Center);
     frame.render_widget(paragraph, popup_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn letter_keys_map_case_insensitively() {
+        for (lower, upper, expected) in [
+            ('q', 'Q', Command::Quit),
+            ('l', 'L', Command::ToggleLeftOnly),
+            ('r', 'R', Command::ToggleRightOnly),
+            ('d', 'D', Command::ToggleDifferent),
+            ('i', 'I', Command::ToggleIdentical),
+        ] {
+            assert_eq!(command_for_key(KeyCode::Char(lower)), Some(expected));
+            assert_eq!(command_for_key(KeyCode::Char(upper)), Some(expected));
+        }
+    }
+
+    #[test]
+    fn jump_keys_are_case_sensitive() {
+        assert_eq!(command_for_key(KeyCode::Char('n')), Some(Command::JumpNextMatching));
+        assert_eq!(command_for_key(KeyCode::Char('N')), Some(Command::JumpPrevMatching));
+    }
+
+    #[test]
+    fn navigation_and_tool_keys_map() {
+        assert_eq!(command_for_key(KeyCode::F(5)), Some(Command::Rescan));
+        assert_eq!(command_for_key(KeyCode::Down), Some(Command::CursorDown));
+        assert_eq!(command_for_key(KeyCode::Up), Some(Command::CursorUp));
+        assert_eq!(command_for_key(KeyCode::PageDown), Some(Command::PageDown));
+        assert_eq!(command_for_key(KeyCode::PageUp), Some(Command::PageUp));
+        assert_eq!(command_for_key(KeyCode::Home), Some(Command::CursorHome));
+        assert_eq!(command_for_key(KeyCode::End), Some(Command::CursorEnd));
+        assert_eq!(command_for_key(KeyCode::Enter), Some(Command::Open));
+        assert_eq!(command_for_key(KeyCode::Char('[')), Some(Command::ViewLeft));
+        assert_eq!(command_for_key(KeyCode::Char(']')), Some(Command::ViewRight));
+        assert_eq!(command_for_key(KeyCode::Char('{')), Some(Command::EditLeft));
+        assert_eq!(command_for_key(KeyCode::Char('}')), Some(Command::EditRight));
+    }
+
+    #[test]
+    fn unknown_keys_map_to_none() {
+        assert_eq!(command_for_key(KeyCode::Char('x')), None);
+        assert_eq!(command_for_key(KeyCode::Esc), None);
+        assert_eq!(command_for_key(KeyCode::F(1)), None);
+    }
 }

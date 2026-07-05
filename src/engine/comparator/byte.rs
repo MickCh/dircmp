@@ -1,5 +1,5 @@
-use super::{CompareResult, FileComparator};
-use anyhow::Result;
+use super::{size_precheck, CompareResult, FileComparator};
+use anyhow::{Context, Result};
 use std::{fs::File, io::Read, path::Path};
 
 const BUF_SIZE: usize = 65536; // 64 KB
@@ -27,37 +27,21 @@ impl ByteComparator {
 
 impl FileComparator for ByteComparator {
     fn compare(&self, a: &Path, b: &Path) -> Result<CompareResult> {
-        // Quick size check — avoids opening files when sizes differ.
-        if let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) {
-            if ma.len() != mb.len() {
-                return Ok(CompareResult::Different);
-            }
-            if ma.len() == 0 {
-                return Ok(CompareResult::Identical);
-            }
+        if let Some(result) = size_precheck(a, b) {
+            return Ok(result);
         }
 
-        let mut file_a = match File::open(a) {
-            Ok(f) => f,
-            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e))),
-        };
-        let mut file_b = match File::open(b) {
-            Ok(f) => f,
-            Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e))),
-        };
+        let mut file_a = File::open(a).with_context(|| format!("Read error {}", a.display()))?;
+        let mut file_b = File::open(b).with_context(|| format!("Read error {}", b.display()))?;
 
         let mut buf_a = [0u8; BUF_SIZE];
         let mut buf_b = [0u8; BUF_SIZE];
 
         loop {
-            let n_a = match Self::read_chunk(&mut file_a, &mut buf_a) {
-                Ok(n) => n,
-                Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", a.display(), e))),
-            };
-            let n_b = match Self::read_chunk(&mut file_b, &mut buf_b) {
-                Ok(n) => n,
-                Err(e) => return Ok(CompareResult::Error(format!("Read error {}: {}", b.display(), e))),
-            };
+            let n_a = Self::read_chunk(&mut file_a, &mut buf_a)
+                .with_context(|| format!("Read error {}", a.display()))?;
+            let n_b = Self::read_chunk(&mut file_b, &mut buf_b)
+                .with_context(|| format!("Read error {}", b.display()))?;
 
             if n_a != n_b || buf_a[..n_a] != buf_b[..n_b] {
                 return Ok(CompareResult::Different);

@@ -9,29 +9,37 @@ A Rust TUI application for comparing two folder trees side-by-side, inspired by 
 
 ## Architecture
 
-Three clearly separated layers:
+Three clearly separated layers with a one-directional dependency graph: `app → ui → engine → config`. The binary is thin — `main.rs` contains no `mod` declarations; it consumes the lib crate (`use dircmp::…`) so every module compiles exactly once.
 
 ```
 src/
-├── main.rs              – CLI arg parsing, terminal init/cleanup
-├── lib.rs               – re-exports all modules
-├── app.rs               – App struct, main event loop, key handling, external tool launch
+├── main.rs              – CLI arg parsing, disk-type detection, terminal init (ratatui::init/restore)
+├── lib.rs               – declares all modules (the only place with mod declarations)
+├── app.rs               – App struct, main event loop, Command enum (KeyCode → Command → apply), external tool launch
 ├── config/mod.rs        – Config structs + TOML loading
 ├── engine/
 │   ├── scanner.rs       – Recursive folder scan → EntryMap (HashMap<PathBuf, Entry>)
-│   ├── diff.rs          – DiffEngine: merges two EntryMaps → DiffResult
+│   ├── diff.rs          – DiffEngine (structural diff + sequential full diff), DiffFilter, compare_entry()
+│   ├── pipeline.rs      – Background threads for both phases: spawn_scan() / spawn_comparison() → mpsc receivers
 │   └── comparator/
-│       ├── mod.rs       – FileComparator trait + create_comparator() factory
+│       ├── mod.rs       – FileComparator trait + create_comparator() factory + size_precheck() helper
 │       ├── hash.rs      – BLAKE3 comparison
 │       ├── metadata.rs  – size + mtime comparison
 │       ├── byte.rs      – byte-by-byte comparison
 │       └── text.rs      – text with optional whitespace/case normalization
 └── ui/
+    ├── mod.rs           – AppState (Idle|Scanning|Comparing|Ready)
     ├── layout.rs        – AppLayout: header (1 line) + main + statusbar (2 lines)
-    ├── panel.rs         – DiffView (unified list), ViewRow, build_view_rows(), nav helpers (next/prev/nth entry, next/prev matching)
-    ├── statusbar.rs     – StatusBar: stats + keybinding hints (dynamic, tool-aware)
+    ├── panel.rs         – DiffView (unified list), ViewRow, ViewRows (row list + cursor navigation methods)
+    ├── statusbar.rs     – StatusBar + StatusBarContext: stats + keybinding hints (dynamic, tool-aware)
     └── theme.rs         – Theme: all Style constants
 ```
+
+Key conventions:
+- **Comparison logic lives in `engine`, never in `app`.** `app` only polls the `mpsc` receivers returned by `engine::pipeline` and updates the view. The `CompareResult → DiffStatus` mapping exists in exactly one place: `engine::diff::compare_entry()`.
+- **UI modules never import from `app`.** Types shared with widgets live at or below the widget's layer (`DiffFilter` in `engine/diff.rs`, `AppState` in `ui/mod.rs`).
+- **Comparator errors go through `anyhow::Result`** (with path context); `CompareResult` is only `Identical | Different`. `compare_entry` folds `Err` into `DiffStatus::Error` using `format!("{e:#}")` to keep the whole context chain.
+- **Key handling is a pure function** `command_for_key(KeyCode) -> Option<Command>` followed by `App::apply(Command)` — the key map is unit-tested inline in `app.rs`.
 
 ### Key Types
 
@@ -43,11 +51,15 @@ src/
 | `DiffEntry` | `engine/diff.rs` | Single entry: `relative_path`, `status`, `is_dir` |
 | `DiffStatus` | `engine/diff.rs` | `Pending\|LeftOnly\|RightOnly\|Identical\|Different\|DirectoryPresent\|TypeConflict\|Error` |
 | `FileComparator` | `engine/comparator/mod.rs` | Trait: `compare(&Path, &Path) -> Result<CompareResult>` |
-| `CompareResult` | `engine/comparator/mod.rs` | `Identical\|Different\|Error(String)` |
+| `CompareResult` | `engine/comparator/mod.rs` | `Identical\|Different` – failures reported via `anyhow::Result` |
+| `ScanMsg` / `CompareMsg` | `engine/pipeline.rs` | Messages streamed from the background scan/comparison threads |
 | `ViewRow` | `ui/panel.rs` | `FolderHeader(String)\|Entry(usize)` – index into DiffResult entries |
+| `ViewRows` | `ui/panel.rs` | Filtered row list; owns cursor navigation (`next/prev/nth_next/nth_prev/first/last/next_matching/prev_matching` skip headers) |
 | `DiffView` | `ui/panel.rs` | Single-cursor list widget; `list_state: ListState` |
-| `DiffFilter` | `app.rs` | Struct with four independent bool flags: `show_left_only`, `show_right_only`, `show_different`, `show_identical` |
-| `AppState` | `app.rs` | `Idle\|Scanning\|Comparing{done,total}\|Ready` |
+| `DiffFilter` | `engine/diff.rs` | Struct with four independent bool flags: `show_left_only`, `show_right_only`, `show_different`, `show_identical` |
+| `AppState` | `ui/mod.rs` | `Idle\|Scanning\|Comparing{done,total}\|Ready` |
+| `StatusBarContext` | `ui/statusbar.rs` | Parameter object with everything the status bar renders per frame |
+| `Command` | `app.rs` | User command decoded from a key press (`Quit\|Rescan\|Toggle*\|Cursor*\|Open\|View*\|Edit*`) |
 | `ExternalAction` | `app.rs` | `Diff{left,right}\|ViewLeft\|EditLeft\|ViewRight\|EditRight` – queued before terminal handoff |
 
 ## Extending: Adding a New Comparator
@@ -177,4 +189,4 @@ cargo test
 ```
 
 Integration tests: `tests/engine_tests.rs`
-Unit tests: inline in `src/engine/comparator/text.rs`
+Unit tests: inline in `src/engine/comparator/text.rs` (normalization) and `src/app.rs` (key → Command map)

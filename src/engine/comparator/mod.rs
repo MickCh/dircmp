@@ -7,15 +7,14 @@ use crate::config::{ComparisonConfig, ComparisonStrategy};
 use anyhow::Result;
 use std::path::Path;
 
-/// Result of comparing two files.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Result of comparing two files. Failures (unreadable file, metadata error)
+/// are reported through the `anyhow::Result` returned by [`FileComparator::compare`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompareResult {
     /// Files are identical.
     Identical,
     /// Files differ.
     Different,
-    /// Cannot compare (e.g. read error, type mismatch).
-    Error(String),
 }
 
 /// Trait defining the file comparator interface.
@@ -26,6 +25,21 @@ pub trait FileComparator: Send + Sync {
 
     /// Strategy name (displayed in the UI).
     fn name(&self) -> &str;
+}
+
+/// Size-based shortcut shared by content comparators: different sizes → `Different`,
+/// both empty → `Identical`. Returns `None` when contents must actually be read
+/// (equal non-zero sizes, or metadata unavailable).
+pub(crate) fn size_precheck(a: &Path, b: &Path) -> Option<CompareResult> {
+    let ma = std::fs::metadata(a).ok()?;
+    let mb = std::fs::metadata(b).ok()?;
+    if ma.len() != mb.len() {
+        Some(CompareResult::Different)
+    } else if ma.len() == 0 {
+        Some(CompareResult::Identical)
+    } else {
+        None
+    }
 }
 
 /// Creates a comparator based on the configuration.

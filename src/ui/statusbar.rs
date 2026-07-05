@@ -1,8 +1,7 @@
 use crate::{
-    app::{AppState, DiffFilter},
     config::ToolsConfig,
-    engine::diff::{DiffEntry, DiffResult, DiffStatus},
-    ui::theme::Theme,
+    engine::diff::{DiffEntry, DiffFilter, DiffResult, DiffStatus},
+    ui::{theme::Theme, AppState},
 };
 use ratatui::{
     layout::Rect,
@@ -12,26 +11,26 @@ use ratatui::{
     Frame,
 };
 
+/// Everything the status bar needs to render one frame, borrowed from `App`.
+pub struct StatusBarContext<'a> {
+    pub diff: Option<&'a DiffResult>,
+    pub comparator_name: &'a str,
+    pub state: &'a AppState,
+    pub filter: &'a DiffFilter,
+    pub tools: &'a ToolsConfig,
+    pub selected: Option<&'a DiffEntry>,
+    pub scan_errors: usize,
+    pub status_message: Option<&'a str>,
+}
+
 pub struct StatusBar;
 
 impl StatusBar {
-    #[allow(clippy::too_many_arguments)]
-    pub fn render(
-        frame: &mut Frame,
-        area: Rect,
-        diff: Option<&DiffResult>,
-        comparator_name: &str,
-        state: &AppState,
-        filter: &DiffFilter,
-        tools: &ToolsConfig,
-        selected: Option<&DiffEntry>,
-        scan_errors: usize,
-        status_message: Option<&str>,
-    ) {
-        let stats = if let Some(msg) = status_message {
+    pub fn render(frame: &mut Frame, area: Rect, ctx: &StatusBarContext) {
+        let stats = if let Some(msg) = ctx.status_message {
             format!(" ⚠ {msg}")
         } else {
-            match state {
+            match ctx.state {
                 AppState::Idle => " Press F5 to compare folders".to_string(),
                 AppState::Scanning => " ⏳ Scanning…".to_string(),
                 AppState::Comparing { done, total } => {
@@ -39,9 +38,9 @@ impl StatusBar {
                     format!(" ⏳ Comparing files… ({}/{}) {}%", done, total, pct)
                 }
                 AppState::Ready => {
-                    if let Some(result) = diff {
-                        let errors_str = if scan_errors > 0 {
-                            format!("  ⚠ {scan_errors} scan errors")
+                    if let Some(result) = ctx.diff {
+                        let errors_str = if ctx.scan_errors > 0 {
+                            format!("  ⚠ {} scan errors", ctx.scan_errors)
                         } else {
                             String::new()
                         };
@@ -52,7 +51,7 @@ impl StatusBar {
                             result.count_left_only(),
                             result.count_right_only(),
                             result.count_identical(),
-                            comparator_name,
+                            ctx.comparator_name,
                             errors_str,
                         )
                     } else {
@@ -64,7 +63,7 @@ impl StatusBar {
 
         // Compute per-action availability based on selected entry.
         let has_left = matches!(
-            selected.map(|e| &e.status),
+            ctx.selected.map(|e| &e.status),
             Some(
                 DiffStatus::LeftOnly
                     | DiffStatus::Different
@@ -74,7 +73,7 @@ impl StatusBar {
             )
         );
         let has_right = matches!(
-            selected.map(|e| &e.status),
+            ctx.selected.map(|e| &e.status),
             Some(
                 DiffStatus::RightOnly
                     | DiffStatus::Different
@@ -83,9 +82,9 @@ impl StatusBar {
                     | DiffStatus::Error(_)
             )
         );
-        let can_enter = match selected.map(|e| &e.status) {
-            Some(DiffStatus::Different) => tools.diff_tool.is_some(),
-            Some(DiffStatus::LeftOnly | DiffStatus::RightOnly) => tools.viewer.is_some(),
+        let can_enter = match ctx.selected.map(|e| &e.status) {
+            Some(DiffStatus::Different) => ctx.tools.diff_tool.is_some(),
+            Some(DiffStatus::LeftOnly | DiffStatus::RightOnly) => ctx.tools.viewer.is_some(),
             _ => false,
         };
         fn key(active: bool) -> Style {
@@ -95,6 +94,7 @@ impl StatusBar {
             if active { Theme::statusbar() } else { Theme::statusbar_inactive_key() }
         }
 
+        let filter = ctx.filter;
         let mut key_spans = vec![
             Span::styled(" F5", Theme::statusbar_key()),
             Span::styled(":Scan", Theme::statusbar()),
@@ -114,19 +114,19 @@ impl StatusBar {
             Span::styled(":Jump", Theme::statusbar()),
         ];
 
-        if tools.diff_tool.is_some() {
+        if ctx.tools.diff_tool.is_some() {
             key_spans.push(Span::styled("  Enter", key(can_enter)));
             key_spans.push(Span::styled(":Diff", label(can_enter)));
         }
 
-        if tools.viewer.is_some() {
+        if ctx.tools.viewer.is_some() {
             key_spans.push(Span::styled("  [", key(has_left)));
             key_spans.push(Span::styled("/", Theme::statusbar_inactive_key()));
             key_spans.push(Span::styled("]", key(has_right)));
             key_spans.push(Span::styled(":View", label(has_left || has_right)));
         }
 
-        if tools.editor.is_some() {
+        if ctx.tools.editor.is_some() {
             key_spans.push(Span::styled("  {", key(has_left)));
             key_spans.push(Span::styled("/", Theme::statusbar_inactive_key()));
             key_spans.push(Span::styled("}", key(has_right)));

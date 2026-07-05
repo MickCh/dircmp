@@ -18,6 +18,203 @@ pub enum ViewRow {
     Entry(usize),
 }
 
+/// The filtered, header-decorated row list of the diff view.
+///
+/// Owns the invariant that cursor navigation lands only on `Entry` rows —
+/// all movement helpers skip `FolderHeader` rows.
+#[derive(Default)]
+pub struct ViewRows(Vec<ViewRow>);
+
+impl ViewRows {
+    /// Builds the row list from `entries`.
+    ///
+    /// `matches` controls which entries are visible (filter predicate).
+    /// `ViewRow::Entry(i)` stores the *original index* into `entries` so the
+    /// render path can look up the entry without cloning it.
+    pub fn build<F>(entries: &[DiffEntry], matches: F) -> Self
+    where
+        F: Fn(&DiffEntry) -> bool,
+    {
+        let mut rows: Vec<ViewRow> = Vec::new();
+        let mut current_parent: Option<PathBuf> = None;
+
+        for (i, entry) in entries.iter().enumerate() {
+            if entry.is_dir || !matches(entry) {
+                continue;
+            }
+
+            let parent = entry
+                .relative_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
+
+            if current_parent.as_ref() != Some(&parent) {
+                let header = if parent.as_os_str().is_empty() {
+                    "./".to_string()
+                } else {
+                    format!("{}/", parent.display())
+                };
+                rows.push(ViewRow::FolderHeader(header));
+                current_parent = Some(parent);
+            }
+
+            rows.push(ViewRow::Entry(i));
+        }
+
+        Self(rows)
+    }
+
+    /// Wraps a raw row list. Intended for tests that need row layouts
+    /// `build` would never produce (e.g. trailing headers).
+    pub fn from_rows(rows: Vec<ViewRow>) -> Self {
+        Self(rows)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn get(&self, idx: usize) -> Option<&ViewRow> {
+        self.0.get(idx)
+    }
+
+    pub fn as_slice(&self) -> &[ViewRow] {
+        &self.0
+    }
+
+    /// Returns the next index pointing to an Entry row, or `current` if already at the last one.
+    pub fn next(&self, current: usize) -> usize {
+        let rows = &self.0;
+        let mut i = current + 1;
+        while i < rows.len() {
+            if matches!(rows[i], ViewRow::Entry(_)) {
+                return i;
+            }
+            i += 1;
+        }
+        current
+    }
+
+    /// Returns the previous index pointing to an Entry row, or `current` if already at the first one.
+    pub fn prev(&self, current: usize) -> usize {
+        let rows = &self.0;
+        if current == 0 {
+            return current;
+        }
+        let mut i = current - 1;
+        loop {
+            if matches!(rows[i], ViewRow::Entry(_)) {
+                return i;
+            }
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+        current
+    }
+
+    /// Advances `n` Entry rows forward in a single pass; stops at the last Entry if fewer remain.
+    pub fn nth_next(&self, current: usize, n: usize) -> usize {
+        let mut count = 0;
+        let mut result = current;
+        for (i, row) in self.0.iter().enumerate().skip(current + 1) {
+            if matches!(row, ViewRow::Entry(_)) {
+                result = i;
+                count += 1;
+                if count == n {
+                    return i;
+                }
+            }
+        }
+        result
+    }
+
+    /// Moves `n` Entry rows backward in a single pass; stops at the first Entry if fewer remain.
+    pub fn nth_prev(&self, current: usize, n: usize) -> usize {
+        let rows = &self.0;
+        let mut count = 0;
+        let mut result = current;
+        let mut i = current;
+        while i > 0 {
+            i -= 1;
+            if matches!(rows[i], ViewRow::Entry(_)) {
+                result = i;
+                count += 1;
+                if count == n {
+                    return i;
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns the index of the first Entry row, or 0 if there are none.
+    pub fn first(&self) -> usize {
+        self.0
+            .iter()
+            .position(|r| matches!(r, ViewRow::Entry(_)))
+            .unwrap_or(0)
+    }
+
+    /// Returns the index of the last Entry row, or 0 if there are none.
+    pub fn last(&self) -> usize {
+        self.0
+            .iter()
+            .rposition(|r| matches!(r, ViewRow::Entry(_)))
+            .unwrap_or(0)
+    }
+
+    /// Returns the next index pointing to an Entry row whose `DiffEntry` satisfies `pred`,
+    /// or `current` if no such row is found after the current position.
+    pub fn next_matching<F>(&self, entries: &[DiffEntry], current: usize, pred: F) -> usize
+    where
+        F: Fn(&DiffEntry) -> bool,
+    {
+        let rows = &self.0;
+        let mut i = current + 1;
+        while i < rows.len() {
+            if let ViewRow::Entry(idx) = &rows[i]
+                && pred(&entries[*idx])
+            {
+                return i;
+            }
+            i += 1;
+        }
+        current
+    }
+
+    /// Returns the previous index pointing to an Entry row whose `DiffEntry` satisfies `pred`,
+    /// or `current` if no such row is found before the current position.
+    pub fn prev_matching<F>(&self, entries: &[DiffEntry], current: usize, pred: F) -> usize
+    where
+        F: Fn(&DiffEntry) -> bool,
+    {
+        let rows = &self.0;
+        if current == 0 {
+            return current;
+        }
+        let mut i = current - 1;
+        loop {
+            if let ViewRow::Entry(idx) = &rows[i]
+                && pred(&entries[*idx])
+            {
+                return i;
+            }
+            if i == 0 {
+                break;
+            }
+            i -= 1;
+        }
+        current
+    }
+}
+
 pub struct DiffView {
     pub list_state: ListState,
     /// First visible row – managed manually to enable virtual scrolling.
@@ -45,7 +242,7 @@ impl DiffView {
         &mut self,
         frame: &mut Frame,
         area: Rect,
-        rows: &[ViewRow],
+        rows: &ViewRows,
         entries: &[DiffEntry],
     ) {
         let height = area.height as usize;
@@ -76,7 +273,7 @@ impl DiffView {
 
         // Build ListItems ONLY for the visible window (~terminal height rows,
         // typically 40–60), not for the entire list (potentially 35 000+ rows).
-        let items: Vec<ListItem> = rows[start..end]
+        let items: Vec<ListItem> = rows.as_slice()[start..end]
             .iter()
             .map(|row| match row {
                 ViewRow::FolderHeader(path) => make_header_item(path, total_width),
@@ -188,173 +385,4 @@ fn entry_styles(
         ),
         DiffStatus::DirectoryPresent => unreachable!("directory entries become folder headers"),
     }
-}
-
-/// Builds the list of view rows from `entries`.
-///
-/// `matches` controls which entries are visible (filter predicate).
-/// `ViewRow::Entry(i)` stores the *original index* into `entries` so the
-/// render path can look up the entry without cloning it.
-pub fn build_view_rows<F>(entries: &[DiffEntry], matches: F) -> Vec<ViewRow>
-where
-    F: Fn(&DiffEntry) -> bool,
-{
-    let mut rows: Vec<ViewRow> = Vec::new();
-    let mut current_parent: Option<PathBuf> = None;
-
-    for (i, entry) in entries.iter().enumerate() {
-        if entry.is_dir || !matches(entry) {
-            continue;
-        }
-
-        let parent = entry
-            .relative_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_default();
-
-        if current_parent.as_ref() != Some(&parent) {
-            let header = if parent.as_os_str().is_empty() {
-                "./".to_string()
-            } else {
-                format!("{}/", parent.display())
-            };
-            rows.push(ViewRow::FolderHeader(header));
-            current_parent = Some(parent);
-        }
-
-        rows.push(ViewRow::Entry(i));
-    }
-
-    rows
-}
-
-/// Returns the next index pointing to an Entry row, or `current` if already at the last one.
-pub fn next_entry(rows: &[ViewRow], current: usize) -> usize {
-    let mut i = current + 1;
-    while i < rows.len() {
-        if matches!(rows[i], ViewRow::Entry(_)) {
-            return i;
-        }
-        i += 1;
-    }
-    current
-}
-
-/// Returns the previous index pointing to an Entry row, or `current` if already at the first one.
-pub fn prev_entry(rows: &[ViewRow], current: usize) -> usize {
-    if current == 0 {
-        return current;
-    }
-    let mut i = current - 1;
-    loop {
-        if matches!(rows[i], ViewRow::Entry(_)) {
-            return i;
-        }
-        if i == 0 {
-            break;
-        }
-        i -= 1;
-    }
-    current
-}
-
-/// Advances `n` Entry rows forward in a single pass; stops at the last Entry if fewer remain.
-pub fn nth_next_entry(rows: &[ViewRow], current: usize, n: usize) -> usize {
-    let mut count = 0;
-    let mut result = current;
-    for (i, row) in rows.iter().enumerate().skip(current + 1) {
-        if matches!(row, ViewRow::Entry(_)) {
-            result = i;
-            count += 1;
-            if count == n {
-                return i;
-            }
-        }
-    }
-    result
-}
-
-/// Moves `n` Entry rows backward in a single pass; stops at the first Entry if fewer remain.
-pub fn nth_prev_entry(rows: &[ViewRow], current: usize, n: usize) -> usize {
-    let mut count = 0;
-    let mut result = current;
-    let mut i = current;
-    while i > 0 {
-        i -= 1;
-        if matches!(rows[i], ViewRow::Entry(_)) {
-            result = i;
-            count += 1;
-            if count == n {
-                return i;
-            }
-        }
-    }
-    result
-}
-
-/// Returns the index of the first Entry row, or 0 if there are none.
-pub fn first_entry(rows: &[ViewRow]) -> usize {
-    rows.iter()
-        .position(|r| matches!(r, ViewRow::Entry(_)))
-        .unwrap_or(0)
-}
-
-/// Returns the index of the last Entry row, or 0 if there are none.
-pub fn last_entry(rows: &[ViewRow]) -> usize {
-    rows.iter()
-        .rposition(|r| matches!(r, ViewRow::Entry(_)))
-        .unwrap_or(0)
-}
-
-/// Returns the next index pointing to an Entry row whose `DiffEntry` satisfies `pred`,
-/// or `current` if no such row is found after the current position.
-pub fn next_entry_matching<F>(
-    rows: &[ViewRow],
-    entries: &[DiffEntry],
-    current: usize,
-    pred: F,
-) -> usize
-where
-    F: Fn(&DiffEntry) -> bool,
-{
-    let mut i = current + 1;
-    while i < rows.len() {
-        if let ViewRow::Entry(idx) = &rows[i]
-            && pred(&entries[*idx])
-        {
-            return i;
-        }
-        i += 1;
-    }
-    current
-}
-
-/// Returns the previous index pointing to an Entry row whose `DiffEntry` satisfies `pred`,
-/// or `current` if no such row is found before the current position.
-pub fn prev_entry_matching<F>(
-    rows: &[ViewRow],
-    entries: &[DiffEntry],
-    current: usize,
-    pred: F,
-) -> usize
-where
-    F: Fn(&DiffEntry) -> bool,
-{
-    if current == 0 {
-        return current;
-    }
-    let mut i = current - 1;
-    loop {
-        if let ViewRow::Entry(idx) = &rows[i]
-            && pred(&entries[*idx])
-        {
-            return i;
-        }
-        if i == 0 {
-            break;
-        }
-        i -= 1;
-    }
-    current
 }

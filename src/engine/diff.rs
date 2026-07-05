@@ -2,7 +2,7 @@ use crate::engine::{
     comparator::{CompareResult, FileComparator},
     scanner::EntryMap,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Comparison status of a single entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,13 +26,10 @@ pub enum DiffStatus {
 }
 
 impl DiffStatus {
-    // Used in integration tests (tests/engine_tests.rs); not called from binary code.
-    #[allow(dead_code)]
     pub fn is_same(&self) -> bool {
         matches!(self, DiffStatus::Identical | DiffStatus::DirectoryPresent)
     }
 
-    #[allow(dead_code)]
     pub fn has_difference(&self) -> bool {
         !self.is_same()
     }
@@ -44,6 +41,45 @@ pub struct DiffEntry {
     pub relative_path: PathBuf,
     pub status: DiffStatus,
     pub is_dir: bool,
+}
+
+/// Visibility filter over diff entries — four independent toggles, one per
+/// user-facing status. Statuses without a toggle are always visible.
+#[derive(Debug, Clone, Copy)]
+pub struct DiffFilter {
+    pub show_left_only: bool,
+    pub show_right_only: bool,
+    pub show_different: bool,
+    pub show_identical: bool,
+}
+
+impl Default for DiffFilter {
+    fn default() -> Self {
+        Self {
+            show_left_only: true,
+            show_right_only: true,
+            show_different: true,
+            show_identical: true,
+        }
+    }
+}
+
+impl DiffFilter {
+    pub fn matches(&self, entry: &DiffEntry) -> bool {
+        match &entry.status {
+            DiffStatus::LeftOnly => self.show_left_only,
+            DiffStatus::RightOnly => self.show_right_only,
+            DiffStatus::Different => self.show_different,
+            DiffStatus::Identical => self.show_identical,
+            // Pending and DirectoryPresent are excluded before reaching this filter
+            // (ViewRows::build skips them). TypeConflict and Error have no toggle —
+            // always visible so the user can see what went wrong.
+            DiffStatus::Pending
+            | DiffStatus::DirectoryPresent
+            | DiffStatus::TypeConflict
+            | DiffStatus::Error(_) => true,
+        }
+    }
 }
 
 /// Full comparison result for two folder trees.
@@ -88,34 +124,42 @@ impl DiffResult {
         self.file_count
     }
 
-    // Iterator accessors kept for use in tests.
-    #[allow(dead_code)]
     pub fn left_only(&self) -> impl Iterator<Item = &DiffEntry> {
         self.entries.iter().filter(|e| e.status == DiffStatus::LeftOnly)
     }
 
-    #[allow(dead_code)]
     pub fn right_only(&self) -> impl Iterator<Item = &DiffEntry> {
         self.entries.iter().filter(|e| e.status == DiffStatus::RightOnly)
     }
 
-    #[allow(dead_code)]
     pub fn different(&self) -> impl Iterator<Item = &DiffEntry> {
         self.entries.iter().filter(|e| e.status == DiffStatus::Different)
     }
 
-    #[allow(dead_code)]
     pub fn identical(&self) -> impl Iterator<Item = &DiffEntry> {
         self.entries.iter().filter(|e| e.status == DiffStatus::Identical)
     }
 }
 
-/// Full diff engine — used in integration tests and future use cases.
+/// Runs `comparator` on one file pair, folding failures into `DiffStatus::Error`.
+/// Single place where `CompareResult` is mapped to `DiffStatus` — used by both
+/// the sequential `DiffEngine::diff` and the background pipeline.
+pub fn compare_entry(comparator: &dyn FileComparator, left: &Path, right: &Path) -> DiffStatus {
+    match comparator.compare(left, right) {
+        Ok(CompareResult::Identical) => DiffStatus::Identical,
+        Ok(CompareResult::Different) => DiffStatus::Different,
+        // `{:#}` prints the whole context chain ("Read error /x: permission denied").
+        Err(e) => DiffStatus::Error(format!("{e:#}")),
+    }
+}
+
+/// Diff engine: builds the structural diff (phase 1) and offers a sequential
+/// full comparison (phase 2) for synchronous use cases and tests. The TUI runs
+/// phase 2 through `engine::pipeline` instead.
 pub struct DiffEngine<'a> {
     comparator: &'a dyn FileComparator,
 }
 
-#[allow(dead_code)]
 impl<'a> DiffEngine<'a> {
     pub fn new(comparator: &'a dyn FileComparator) -> Self {
         Self { comparator }
@@ -183,13 +227,13 @@ impl<'a> DiffEngine<'a> {
         DiffResult { entries, file_count, count_left_only, count_right_only, count_different, count_identical }
     }
 
-    /// Full comparison (used in tests).
+    /// Full sequential comparison (phase 1 + phase 2 in one call).
     pub fn diff(
         &self,
         left: &EntryMap,
         right: &EntryMap,
-        left_root: &std::path::Path,
-        right_root: &std::path::Path,
+        left_root: &Path,
+        right_root: &Path,
     ) -> DiffResult {
         let mut result = Self::diff_structure(left, right);
         let pending_indices: Vec<usize> = result
@@ -202,12 +246,7 @@ impl<'a> DiffEngine<'a> {
         for idx in pending_indices {
             let abs_left = left_root.join(&result.entries[idx].relative_path);
             let abs_right = right_root.join(&result.entries[idx].relative_path);
-            let new_status = match self.comparator.compare(&abs_left, &abs_right) {
-                Ok(CompareResult::Identical) => DiffStatus::Identical,
-                Ok(CompareResult::Different) => DiffStatus::Different,
-                Ok(CompareResult::Error(e)) => DiffStatus::Error(e),
-                Err(e) => DiffStatus::Error(e.to_string()),
-            };
+            let new_status = compare_entry(self.comparator, &abs_left, &abs_right);
             result.update_entry_status(idx, new_status);
         }
         result
