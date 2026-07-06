@@ -16,8 +16,15 @@ impl FileComparator for MetadataComparator {
         let meta_b =
             std::fs::metadata(b).with_context(|| format!("Metadata error {}", b.display()))?;
 
+        let mtime_a = meta_a
+            .modified()
+            .with_context(|| format!("Metadata error {}", a.display()))?;
+        let mtime_b = meta_b
+            .modified()
+            .with_context(|| format!("Metadata error {}", b.display()))?;
+
         let size_eq = meta_a.len() == meta_b.len();
-        let mtime_eq = meta_a.modified().ok() == meta_b.modified().ok();
+        let mtime_eq = mtime_a == mtime_b;
 
         if size_eq && mtime_eq {
             Ok(CompareResult::Identical)

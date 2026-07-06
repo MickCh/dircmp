@@ -194,4 +194,4 @@ cargo test
 ```
 
 Integration tests: `tests/engine_tests.rs`, `tests/ui_tests.rs` (ViewRows building/navigation)
-Unit tests: inline in `src/engine/comparator/text.rs` (normalization), `src/app.rs` (key → Command map) and `src/config/mod.rs` (default template ↔ `Config::default()` lock)
+Unit tests: inline in `src/engine/comparator/text.rs` (normalization), `src/app.rs` (key → Command map, side availability), `src/config/mod.rs` (default template ↔ `Config::default()` lock) and `src/ui/panel.rs` (`fit` display-width padding/truncation)

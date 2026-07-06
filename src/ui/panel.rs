@@ -295,19 +295,38 @@ impl DiffView {
     }
 }
 
+/// Pads or truncates `s` to exactly `width` *display columns* (not chars —
+/// CJK and emoji occupy two columns), so the fixed-width columns stay aligned.
 fn fit(s: &str, width: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= width {
-        format!("{:<width$}", s, width = width)
-    } else {
-        let truncated: String = s.chars().take(width.saturating_sub(1)).collect();
-        format!("{}…", truncated)
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+    let display_width = s.width();
+    if display_width <= width {
+        let mut out = s.to_string();
+        out.extend(std::iter::repeat_n(' ', width - display_width));
+        return out;
     }
+
+    // Truncate to width-1 columns and append an ellipsis. A wide char that
+    // doesn't fit leaves one column short — pad it back with a space.
+    let target = width.saturating_sub(1);
+    let mut out = String::new();
+    let mut w = 0;
+    for c in s.chars() {
+        let cw = c.width().unwrap_or(0);
+        if w + cw > target {
+            break;
+        }
+        out.push(c);
+        w += cw;
+    }
+    out.push('…');
+    out.extend(std::iter::repeat_n(' ', width.saturating_sub(w + 1)));
+    out
 }
 
 fn make_header_item(path: &str, total_width: usize) -> ListItem<'static> {
-    let content = format!(" {}", path);
-    let padded = format!("{:<width$}", content, width = total_width);
+    let padded = fit(&format!(" {}", path), total_width);
     ListItem::new(Line::from(Span::styled(padded, Theme::folder_header())))
 }
 
@@ -391,5 +410,42 @@ fn entry_styles(
             Theme::error(),
         ),
         DiffStatus::DirectoryPresent => unreachable!("directory entries become folder headers"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fit;
+    use unicode_width::UnicodeWidthStr;
+
+    #[test]
+    fn fit_pads_short_strings_to_display_width() {
+        assert_eq!(fit("abc", 6), "abc   ");
+        // "日本" is 2 chars but 4 display columns — pad to 6, not 8.
+        assert_eq!(fit("日本", 6), "日本  ");
+    }
+
+    #[test]
+    fn fit_truncates_to_display_width_with_ellipsis() {
+        assert_eq!(fit("abcdefgh", 5), "abcd…");
+        // Wide chars: "日本語表記" is 10 columns; 5 columns fit "日本" (4) + "…" (1).
+        let s = fit("日本語表記", 5);
+        assert_eq!(s, "日本…");
+        assert_eq!(s.width(), 5);
+    }
+
+    #[test]
+    fn fit_pads_when_wide_char_straddles_the_cut() {
+        // 4 columns: "日" (2) fits, the next "本" (2) would exceed target 3,
+        // so the missing column is padded back after the ellipsis.
+        let s = fit("日本語", 4);
+        assert_eq!(s, "日… ");
+        assert_eq!(s.width(), 4);
+    }
+
+    #[test]
+    fn fit_exact_width_is_unchanged() {
+        assert_eq!(fit("abcd", 4), "abcd");
+        assert_eq!(fit("日本", 4), "日本");
     }
 }

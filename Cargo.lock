@@ -362,6 +362,7 @@ dependencies = [
  "serde",
  "tempfile",
  "toml",
+ "unicode-width",
  "walkdir",
 ]
 
