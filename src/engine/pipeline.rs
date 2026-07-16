@@ -91,11 +91,21 @@ pub fn spawn_comparison(
     std::thread::spawn(move || {
         if parallel {
             use rayon::prelude::*;
+            use std::sync::atomic::{AtomicBool, Ordering};
+            // Set when the receiver is gone (F5 rescan dropped it) so the
+            // remaining items are skipped — an abandoned comparison must stop
+            // doing disk I/O instead of racing the new scan to the end.
+            let cancelled = AtomicBool::new(false);
             let par_tx = tx.clone();
             pool.install(|| {
                 to_compare.par_iter().for_each_with(par_tx, |tx, (rel, left, right)| {
+                    if cancelled.load(Ordering::Relaxed) {
+                        return;
+                    }
                     let status = compare_entry(comparator.as_ref(), left, right);
-                    let _ = tx.send(CompareMsg::Result { path: rel.clone(), status });
+                    if tx.send(CompareMsg::Result { path: rel.clone(), status }).is_err() {
+                        cancelled.store(true, Ordering::Relaxed);
+                    }
                 });
             });
         } else {

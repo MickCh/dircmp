@@ -174,6 +174,18 @@ impl ViewRows {
             .unwrap_or(0)
     }
 
+    /// Returns the row index of the first Entry row whose `DiffEntry` satisfies
+    /// `pred`, or `None`. Used to re-locate the selected entry after a rebuild
+    /// so the cursor follows the entry, not the row number.
+    pub fn find_entry_row<F>(&self, entries: &[DiffEntry], pred: F) -> Option<usize>
+    where
+        F: Fn(&DiffEntry) -> bool,
+    {
+        self.0
+            .iter()
+            .position(|r| matches!(r, ViewRow::Entry(i) if pred(&entries[*i])))
+    }
+
     /// Returns the next index pointing to an Entry row whose `DiffEntry` satisfies `pred`,
     /// or `current` if no such row is found after the current position.
     pub fn next_matching<F>(&self, entries: &[DiffEntry], current: usize, pred: F) -> usize
@@ -297,7 +309,7 @@ impl DiffView {
 
 /// Pads or truncates `s` to exactly `width` *display columns* (not chars —
 /// CJK and emoji occupy two columns), so the fixed-width columns stay aligned.
-fn fit(s: &str, width: usize) -> String {
+pub(crate) fn fit(s: &str, width: usize) -> String {
     use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
     let display_width = s.width();
@@ -331,24 +343,30 @@ fn make_header_item(path: &str, total_width: usize) -> ListItem<'static> {
 }
 
 fn make_entry_item(entry: &DiffEntry, left_col: usize, right_col: usize) -> ListItem<'static> {
-    let mut name = entry
+    let name = entry
         .relative_path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| entry.relative_path.to_string_lossy().into_owned());
-    if entry.is_dir {
-        name.push('/');
-    }
+
+    // A TypeConflict has a directory on exactly one side; `is_dir` records the
+    // left side's type, so the right side is its opposite. Every other status
+    // has the same type on both sides.
+    let (left_is_dir, right_is_dir) = match entry.status {
+        DiffStatus::TypeConflict => (entry.is_dir, !entry.is_dir),
+        _ => (entry.is_dir, entry.is_dir),
+    };
+    let decorated = |is_dir: bool| if is_dir { format!("{name}/") } else { name.clone() };
 
     let (symbol, sym_style, left_style, right_style) = entry_styles(&entry.status);
 
     let left_name = match &entry.status {
         DiffStatus::RightOnly => fit("", left_col),
-        _ => fit(&name, left_col),
+        _ => fit(&decorated(left_is_dir), left_col),
     };
     let right_name = match &entry.status {
         DiffStatus::LeftOnly => fit("", right_col),
-        _ => fit(&name, right_col),
+        _ => fit(&decorated(right_is_dir), right_col),
     };
 
     ListItem::new(Line::from(vec![

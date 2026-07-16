@@ -281,6 +281,50 @@ fn metadata_comparator_same_size_and_mtime() {
     assert_eq!(cmp.compare(&a, &b).unwrap(), CompareResult::Identical);
 }
 
+#[test]
+fn metadata_comparator_mtime_within_tolerance() {
+    let dir = tempdir().unwrap();
+    let a = dir.path().join("a.txt");
+    let b = dir.path().join("b.txt");
+    fs::write(&a, b"hello").unwrap();
+    fs::write(&b, b"hello").unwrap();
+
+    // 1 s apart — within the 2 s FAT-granularity tolerance → Identical.
+    let base = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    fs::File::options().write(true).open(&a).unwrap().set_modified(base).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&b)
+        .unwrap()
+        .set_modified(base + std::time::Duration::from_secs(1))
+        .unwrap();
+
+    let cmp = MetadataComparator::new();
+    assert_eq!(cmp.compare(&a, &b).unwrap(), CompareResult::Identical);
+}
+
+#[test]
+fn metadata_comparator_mtime_beyond_tolerance() {
+    let dir = tempdir().unwrap();
+    let a = dir.path().join("a.txt");
+    let b = dir.path().join("b.txt");
+    fs::write(&a, b"hello").unwrap();
+    fs::write(&b, b"hello").unwrap();
+
+    // 3 s apart — beyond the 2 s tolerance → Different despite equal sizes.
+    let base = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    fs::File::options().write(true).open(&a).unwrap().set_modified(base).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&b)
+        .unwrap()
+        .set_modified(base + std::time::Duration::from_secs(3))
+        .unwrap();
+
+    let cmp = MetadataComparator::new();
+    assert_eq!(cmp.compare(&a, &b).unwrap(), CompareResult::Different);
+}
+
 // ---------------------------------------------------------------------------
 // TextComparator::compare()
 // ---------------------------------------------------------------------------

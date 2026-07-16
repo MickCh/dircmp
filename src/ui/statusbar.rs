@@ -45,7 +45,6 @@ impl StatusBar {
             format!(" ⚠ {msg}")
         } else {
             match ctx.state {
-                AppState::Idle => " Press F5 to compare folders".to_string(),
                 AppState::Scanning => " ⏳ Scanning…".to_string(),
                 AppState::Comparing { done, total } => {
                     let pct = if *total > 0 { done * 100 / total } else { 0 };

@@ -163,11 +163,12 @@ impl Config {
     /// Returns the default path to the configuration file.
     /// Linux/macOS: ~/.config/dircmp/config.toml
     /// Windows:     %APPDATA%\dircmp\config.toml
-    pub fn default_path() -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("dircmp")
-            .join("config.toml")
+    ///
+    /// Errors when no user config directory can be determined — better than
+    /// silently creating `./dircmp/config.toml` in the current directory.
+    pub fn default_path() -> Result<PathBuf> {
+        let dir = dirs::config_dir().context("Cannot determine the user config directory")?;
+        Ok(dir.join("dircmp").join("config.toml"))
     }
 
     /// Returns the default configuration file contents (TOML with comments).

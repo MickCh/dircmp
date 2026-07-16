@@ -147,6 +147,25 @@ fn build_rows_stores_original_indices() {
     assert_eq!(entry_indices(&rows), vec![1]);
 }
 
+#[test]
+fn find_entry_row_locates_entry_by_predicate() {
+    let entries = vec![
+        file_entry("a.txt", DiffStatus::Identical),
+        file_entry("b.txt", DiffStatus::Different),
+    ];
+    let rows = ViewRows::build(&entries, all_match);
+
+    // Row 0 is the "./" header, so a.txt is row 1 and b.txt is row 2.
+    assert_eq!(
+        rows.find_entry_row(&entries, |e| e.relative_path.as_path() == std::path::Path::new("b.txt")),
+        Some(2)
+    );
+    assert_eq!(
+        rows.find_entry_row(&entries, |e| e.relative_path.as_path() == std::path::Path::new("missing.txt")),
+        None
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Navigation — next / prev / first / last
 // ---------------------------------------------------------------------------

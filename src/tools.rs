@@ -48,6 +48,17 @@ pub fn run_action(tools: &ToolsConfig, action: &ExternalAction) -> Result<Option
     Ok(msg)
 }
 
+/// Whether the tool required by `action` is configured. The app layer checks
+/// this before queuing an action so the terminal is never suspended (a visible
+/// flicker) for an action `run_action` would treat as a no-op.
+pub fn action_tool_configured(tools: &ToolsConfig, action: &ExternalAction) -> bool {
+    match action {
+        ExternalAction::Diff { .. } => tools.diff_tool.is_some(),
+        ExternalAction::ViewLeft(_) | ExternalAction::ViewRight(_) => tools.viewer.is_some(),
+        ExternalAction::EditLeft(_) | ExternalAction::EditRight(_) => tools.editor.is_some(),
+    }
+}
+
 fn launch_cmd(tool: &ToolCommand, args: &[&PathBuf]) -> Result<Option<String>> {
     let (program, pre_args) = tool.program_and_args();
     if program.is_empty() {

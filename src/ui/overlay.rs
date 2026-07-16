@@ -13,8 +13,9 @@ pub fn render(frame: &mut Frame, message: &str) {
     if area.width == 0 || area.height == 0 {
         return;
     }
-    let msg_len = message.len() as u16;
-    let width = (msg_len.min(area.width.saturating_sub(4)) + 4).min(area.width);
+    // Display columns, not bytes — the messages contain multi-byte glyphs (⏳, …).
+    let msg_width = unicode_width::UnicodeWidthStr::width(message) as u16;
+    let width = (msg_width.min(area.width.saturating_sub(4)) + 4).min(area.width);
     let height = 3u16.min(area.height);
     let x = area.x + (area.width.saturating_sub(width)) / 2;
     let y = area.y + (area.height.saturating_sub(height)) / 2;

@@ -27,7 +27,7 @@ fn main() -> Result<()> {
             }
             Config::load(&path).with_context(|| format!("Failed to load config: {}", path.display()))?
         }
-        None => Config::load_or_create(&Config::default_path())
+        None => Config::load_or_create(&Config::default_path()?)
             .context("Failed to load configuration")?,
     };
 
@@ -48,31 +48,36 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
     let mut left = None;
     let mut right = None;
     let mut config = None;
+    // After a literal `--`, everything is a folder path — allows comparing
+    // directories whose names start with `-`.
+    let mut positional_only = false;
     let mut i = 1;
 
     while i < args.len() {
-        match args[i].as_str() {
-            "--config" | "-c" => {
-                i += 1;
-                if i >= args.len() {
-                    bail!("Missing path after --config");
+        let arg = args[i].as_str();
+        let is_option = !positional_only && arg.starts_with('-') && arg.len() > 1;
+        if is_option {
+            match arg {
+                "--" => positional_only = true,
+                "--config" | "-c" => {
+                    i += 1;
+                    if i >= args.len() {
+                        bail!("Missing path after --config");
+                    }
+                    config = Some(PathBuf::from(&args[i]));
                 }
-                config = Some(PathBuf::from(&args[i]));
-            }
-            "--help" | "-h" => {
-                print_usage();
-                std::process::exit(0);
-            }
-            arg if !arg.starts_with('-') => {
-                if left.is_none() {
-                    left = Some(PathBuf::from(arg));
-                } else if right.is_none() {
-                    right = Some(PathBuf::from(arg));
-                } else {
-                    bail!("Too many arguments");
+                "--help" | "-h" => {
+                    print_usage();
+                    std::process::exit(0);
                 }
+                _ => bail!("Unknown option: {}", arg),
             }
-            arg => bail!("Unknown option: {}", arg),
+        } else if left.is_none() {
+            left = Some(PathBuf::from(arg));
+        } else if right.is_none() {
+            right = Some(PathBuf::from(arg));
+        } else {
+            bail!("Too many arguments");
         }
         i += 1;
     }
@@ -84,7 +89,7 @@ fn parse_args(args: &[String]) -> Result<(PathBuf, PathBuf, Option<PathBuf>)> {
 }
 
 fn usage_str() -> &'static str {
-    "Usage: dircmp <left_folder> <right_folder> [--config <file>]"
+    "Usage: dircmp [--config <file>] [--] <left_folder> <right_folder>"
 }
 
 fn print_usage() {
@@ -93,6 +98,7 @@ fn print_usage() {
     println!("Options:");
     println!("  -c, --config <file>   Path to TOML configuration file");
     println!("  -h, --help            Show this help");
+    println!("  --                    Treat the remaining arguments as folder paths");
     println!();
     println!("Keys:");
     println!("  F5          Re-run comparison");
@@ -104,5 +110,5 @@ fn print_usage() {
     println!("  ↑ / ↓       Navigate rows");
     println!("  PgUp/PgDn   Scroll");
     println!("  Home/End    Jump to first/last entry");
-    println!("  q           Quit");
+    println!("  q, Ctrl+C   Quit");
 }

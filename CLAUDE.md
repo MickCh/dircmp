@@ -15,7 +15,12 @@ Three clearly separated layers with a one-directional dependency graph: `app →
 src/
 ├── main.rs              – CLI arg parsing, disk-type detection, terminal init (ratatui::init/restore)
 ├── lib.rs               – declares all modules (the only place with mod declarations)
-├── app.rs               – App struct, main event loop, Command enum (KeyCode → Command → apply), Enter policy (open_action_for)
+├── app/
+│   ├── mod.rs           – App struct, main event loop, filtered-view rebuild (cursor follows entry identity)
+│   ├── command.rs       – Command enum, command_for_key (KeyCode + KeyModifiers → Command), App::apply
+│   ├── background.rs    – spawning/polling the background scan & comparison channels (run_diff, poll_*)
+│   ├── external.rs      – Enter/[/]/{/} policy (open_action_for, side_available), tool queuing, terminal handoff
+│   └── render.rs        – per-frame drawing (header, list, status bar, overlay)
 ├── platform.rs          – disk-type detection (/sys/block rotational on Linux)
 ├── tools.rs             – external tool launching (ExternalAction, run_action); depends only on config
 ├── config/mod.rs        – Config structs + TOML loading
@@ -26,7 +31,7 @@ src/
 │   └── comparator/
 │       ├── mod.rs       – FileComparator trait + create_comparator() factory + size_precheck() helper
 │       ├── hash.rs      – BLAKE3 comparison
-│       ├── metadata.rs  – size + mtime comparison
+│       ├── metadata.rs  – size + mtime comparison (±2 s mtime tolerance for FAT granularity)
 │       ├── byte.rs      – byte-by-byte comparison
 │       └── text.rs      – text with optional whitespace/case normalization
 └── ui/
@@ -43,7 +48,8 @@ Key conventions:
 - **UI modules never import from `app`.** Types shared with widgets live at or below the widget's layer (`DiffFilter` in `engine/diff.rs`, `AppState` in `ui/mod.rs`). The status bar receives precomputed `ToolKeyHints` booleans, not `ToolsConfig` or the selected entry — the Enter/tool-key policy lives in `App::open_action_for` / `App::tool_key_hints`, next to the command handling.
 - **`DiffResult.entries` is sorted by relative path** (established in `diff_structure`); lookups go through `DiffResult::find_by_path` (binary search), and the cached per-status counters are maintained solely via `bump_count` / `update_entry_status`.
 - **Comparator errors go through `anyhow::Result`** (with path context); `CompareResult` is only `Identical | Different`. `compare_entry` folds `Err` into `DiffStatus::Error` using `format!("{e:#}")` to keep the whole context chain.
-- **Key handling is a pure function** `command_for_key(KeyCode) -> Option<Command>` followed by `App::apply(Command)` — the key map is unit-tested inline in `app.rs`.
+- **Key handling is a pure function** `command_for_key(KeyCode, KeyModifiers) -> Option<Command>` followed by `App::apply(Command)` — the key map is unit-tested inline in `app/command.rs`. Modified keys are unbound except Ctrl+C (quit) and AltGr (= Ctrl+Alt on Windows terminals, needed for `[`/`]`/`{`/`}` on European layouts), which counts as unmodified.
+- **An abandoned comparison stops early**: both branches of `spawn_comparison` detect a dropped receiver (F5 rescan) and skip the remaining files instead of racing the new scan on disk I/O.
 
 ### Key Types
 
@@ -61,9 +67,9 @@ Key conventions:
 | `ViewRows` | `ui/panel.rs` | Filtered row list; owns cursor navigation (`next/prev/nth_next/nth_prev/first/last/next_matching/prev_matching` skip headers) |
 | `DiffView` | `ui/panel.rs` | Single-cursor list widget; `list_state: ListState` |
 | `DiffFilter` | `engine/diff.rs` | Struct with four independent bool flags: `show_left_only`, `show_right_only`, `show_different`, `show_identical` |
-| `AppState` | `ui/mod.rs` | `Idle\|Scanning\|Comparing{done,total}\|Ready` |
+| `AppState` | `ui/mod.rs` | `Scanning\|Comparing{done,total}\|Ready` |
 | `StatusBarContext` | `ui/statusbar.rs` | Parameter object with everything the status bar renders per frame |
-| `Command` | `app.rs` | User command decoded from a key press (`Quit\|Rescan\|Toggle*\|Cursor*\|Open\|View*\|Edit*`) |
+| `Command` | `app/command.rs` | User command decoded from a key press (`Quit\|Rescan\|Toggle*\|Cursor*\|Open\|View*\|Edit*`) |
 | `ExternalAction` | `tools.rs` | `Diff{left,right}\|ViewLeft\|EditLeft\|ViewRight\|EditRight` – queued before terminal handoff, executed by `tools::run_action` |
 | `ToolKeyHints` | `ui/statusbar.rs` | Precomputed booleans for tool key hints (configured tools, enter_enabled, has_left/right) |
 
@@ -131,7 +137,7 @@ Before the external command runs, the TUI releases raw mode and the alternate sc
 - **Cursor navigation:** `↑↓ PgUp/PgDn Home/End`; cursor skips folder header rows (lands only on file entries)
 - **Status-based jump:** `n`/`N` jump to the next/previous entry whose status matches the currently selected entry (e.g. standing on a `Different` entry, `n` finds the next `Different`); defaults to `Different` when nothing is selected
 - **Filters:** four independent toggles (L/R/D/I keys) for left-only, right-only, different, identical entries
-- **Overlay:** `Scanning` shows a spinner overlay; `Idle` shows "press F5" hint
+- **Overlay:** `Scanning` shows a spinner overlay
 - **No file sizes shown** — removed from `DiffEntry` entirely (not just hidden)
 - **Virtual scrolling:** only the visible window of rows is rendered; handles 35 000+ entries without cloning
 
@@ -151,9 +157,9 @@ Before the external command runs, the TUI releases raw mode and the alternate sc
 | `R` | Toggle show-right-only filter |
 | `D` | Toggle show-different filter |
 | `I` | Toggle show-identical filter |
-| `Q` | Quit |
+| `Q` / `Ctrl+C` | Quit |
 
-Keys for external tools are only shown in the status bar when the corresponding tool is configured.
+Keys for external tools are only shown in the status bar when the corresponding tool is configured; pressing them without the tool configured does nothing (the terminal is never suspended for a no-op).
 
 ### Row layout (fixed-width columns)
 
@@ -194,4 +200,4 @@ cargo test
 ```
 
 Integration tests: `tests/engine_tests.rs`, `tests/ui_tests.rs` (ViewRows building/navigation)
-Unit tests: inline in `src/engine/comparator/text.rs` (normalization), `src/app.rs` (key → Command map, side availability), `src/config/mod.rs` (default template ↔ `Config::default()` lock) and `src/ui/panel.rs` (`fit` display-width padding/truncation)
+Unit tests: inline in `src/engine/comparator/text.rs` (normalization), `src/app/command.rs` (key → Command map, modifier handling), `src/app/external.rs` (side availability), `src/config/mod.rs` (default template ↔ `Config::default()` lock) and `src/ui/panel.rs` (`fit` display-width padding/truncation)
